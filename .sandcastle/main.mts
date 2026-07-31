@@ -171,6 +171,12 @@ function branchFor(id: string): string {
   return `sandcastle/issue-${id}`;
 }
 
+// Planners need an isolated checkout but must never retain or publish work.
+// Supplying the exact temporary branch lets us remove it after a clean run.
+function plannerBranchFor(iteration: number): string {
+  return `sandcastle/planner/${Date.now().toString(36)}-${process.pid}-${iteration}`;
+}
+
 // Probe an exact full ref. `git branch --list` would be ambiguous between
 // local and remote refs, which have different publication semantics here.
 function branchExists(ref: string): boolean {
@@ -490,11 +496,19 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
 
   let plan: z.infer<typeof planSchema>;
   try {
+    const branch = plannerBranchFor(iteration);
     const result = await withDockerSbxProvider(sbxOptions(`planner-${iteration}`), (provider) => sandcastle.run({
       hooks: {}, sandbox: provider, name: "planner", maxIterations: 1,
       agent: highCapAgent, promptFile: "./.sandcastle/plan-prompt.md",
+      branchStrategy: { type: "branch", branch },
       output: sandcastle.Output.object({ tag: "plan", schema: planSchema }),
     }));
+    // A planner is read-only. Preserve unexpected work for investigation rather
+    // than deleting it or allowing it to affect the orchestration checkout.
+    if (result.commits.length || result.preservedWorktreePath) {
+      throw new Error(`planner unexpectedly changed ${branch}`);
+    }
+    git(["branch", "--delete", "--force", branch]);
     plan = result.output;
   } catch (error) {
     // Without validated structured output there is no safe branch/root mapping,

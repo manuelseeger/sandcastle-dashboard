@@ -18,3 +18,11 @@ test("Sandcastle publication assigns a root branch to its same-named remote upst
     /git\(\["push", "--set-upstream", "origin", `refs\/heads\/\$\{branch\}:refs\/heads\/\$\{branch\}`\]\)/,
   );
 });
+
+test("Sandcastle discards a clean planner-only branch", async () => {
+  const source = await readFile(".sandcastle/main.mts", "utf8");
+
+  assert.match(source, /branchStrategy: \{ type: "branch", branch \}/);
+  assert.match(source, /if \(result\.commits\.length \|\| result\.preservedWorktreePath\)/);
+  assert.match(source, /git\(\["branch", "--delete", "--force", branch\]\)/);
+});
