@@ -63,6 +63,14 @@ def _format_branch(castle: Castle) -> str:
     )
 
 
+def _format_agent_model(castle: Castle) -> str:
+    return (
+        f"Model: {castle.agent_model}"
+        if castle.agent_model is not None
+        else "Model: unknown"
+    )
+
+
 def _castles_for_host_run(
     castles: Sequence[Castle], host_run_id: str | None
 ) -> list[Castle]:
@@ -513,6 +521,6 @@ class DashboardApp(App[None]):
             f"{castle.name}\n"
             f"{_format_scope(castle)} • phase: {castle.phase} • {castle.vm_state}\n"
             f"{_format_uptime(castle.uptime_seconds)} • {sessions} session(s)\n"
-            f"{_format_branch(castle)}\n"
+            f"{_format_agent_model(castle)} • {_format_branch(castle)}\n"
             f"Last activity: {self._format_relative_time(castle.last_activity_at)}"
         )

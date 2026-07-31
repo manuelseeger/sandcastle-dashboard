@@ -62,6 +62,7 @@ class Castle:
     uptime_seconds: float | None = None
     session_count: int | None = None
     phase: str = "provisioning"
+    agent_model: str | None = None
     last_activity_at: float | None = None
     log_tail: tuple[str, ...] = field(default_factory=tuple)
 

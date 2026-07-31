@@ -55,6 +55,7 @@ def test_correlate_castles_matches_by_pid_when_no_explicit_invocation_id():
     assert castle.host_run_id == "run-1"
     assert castle.scope == "issue"
     assert castle.issue_number == 9
+    assert castle.agent_model == "claude-sonnet-5"
     assert castle.vm_state == "running"
 
 
@@ -104,6 +105,27 @@ def test_correlate_castles_rejects_an_invocation_match_from_the_wrong_deployment
     castles = correlate_castles([inspection], [wrong_deployment_run])
 
     assert castles == ()
+
+
+def test_correlate_castles_assigns_high_capacity_model_to_planner_and_merger_castles():
+    host_run = HostRun(id="run-1", pid=42)
+    inspections = (
+        CastleInspection(
+            name="parames-local-42-planner-1-abc",
+            vm_state="running",
+        ),
+        CastleInspection(
+            name="parames-local-42-merge-9-abc",
+            vm_state="running",
+        ),
+    )
+
+    castles = correlate_castles(inspections, (host_run,))
+
+    assert [castle.agent_model for castle in castles] == [
+        "claude-opus-5",
+        "claude-opus-5",
+    ]
 
 
 def test_correlate_castles_carries_uptime_and_session_count_through():

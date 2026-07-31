@@ -338,6 +338,26 @@ async def test_dashboard_app_shows_an_enriched_github_issue_title():
         assert "#9 Enrich and open focused GitHub issues" in text
 
 
+async def test_dashboard_app_shows_each_castles_agent_model():
+    run = HostRun(id="run-1", pid=42, started_at=10.0)
+    castle = Castle(
+        name="parames-prod-42-issue-9-abc",
+        host_run_id="run-1",
+        scope="issue",
+        issue_number=9,
+        vm_state="running",
+        agent_model="claude-sonnet-5",
+    )
+    provider = StaticSnapshotProvider(Snapshot(host_runs=(run,), castles=(castle,)))
+    app = DashboardApp(snapshot_provider=provider, poll_interval=100)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        text = _castle_pane_texts(app)[0]
+        assert "Model: claude-sonnet-5" in text
+
+
 async def test_dashboard_app_shows_an_issue_castles_inferred_phase():
     run = HostRun(id="run-1", pid=42, started_at=10.0)
     castle = Castle(

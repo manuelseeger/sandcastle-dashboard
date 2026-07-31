@@ -20,6 +20,9 @@ def test_main_runs_the_dashboard_app_with_a_live_host_run_snapshot_provider(
             captured["ran"] = True
 
     monkeypatch.setattr(cli, "DashboardApp", FakeDashboardApp)
+    monkeypatch.setattr(
+        LiveHostRunSnapshotProvider, "get_snapshot", lambda _provider: Snapshot()
+    )
 
     result = CliRunner().invoke(cli.main)
 

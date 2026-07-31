@@ -20,6 +20,14 @@ from sandcastle_dashboard.snapshot import Castle, HostRun
 
 _SCOPE_LABELS = {"planner": "planner", "issue": "issue", "merge": "merger"}
 
+# Keep this in sync with the agents configured in .sandcastle/main.mts. Issue
+# Castles run the implementer and reviewer sequentially on the same Sonnet model.
+_MODEL_BY_SCOPE = {
+    "planner": "claude-opus-5",
+    "issue": "claude-sonnet-5",
+    "merger": "claude-opus-5",
+}
+
 
 class ParsedCastleName:
     """The correlation-relevant segments of a Castle name, if recognized."""
@@ -79,6 +87,7 @@ def correlate_castles(
                 name=inspection.name,
                 host_run_id=host_run_id,
                 scope=parsed.scope,
+                agent_model=_MODEL_BY_SCOPE[parsed.scope],
                 issue_number=_as_int(parsed.scope_id)
                 if parsed.scope == "issue"
                 else None,
