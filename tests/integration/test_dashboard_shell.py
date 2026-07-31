@@ -351,3 +351,45 @@ async def test_dashboard_app_shows_readable_status_when_castle_discovery_fails()
 
         status = app.query_one("#castle-status", Static).content
         assert "sbx is not installed" in status
+
+
+class SequencedSnapshotProvider:
+    """Returns each snapshot in ``snapshots`` in turn, repeating the last."""
+
+    def __init__(self, snapshots: list[Snapshot]) -> None:
+        self._snapshots = snapshots
+        self.call_count = 0
+
+    def get_snapshot(self) -> Snapshot:
+        index = min(self.call_count, len(self._snapshots) - 1)
+        self.call_count += 1
+        return self._snapshots[index]
+
+
+async def test_dashboard_app_updates_castle_grid_across_refreshes_without_crashing():
+    """A running Castle can reappear with the same name across polls (for
+    example, a session count changing). Re-mounting must not race with the
+    previous poll's teardown and must never leave stale or duplicate panes."""
+    run = HostRun(id="run-1", pid=42, started_at=10.0)
+
+    def snapshot_with(count: int) -> Snapshot:
+        castles = tuple(
+            Castle(name=f"c{i}", host_run_id="run-1", scope="issue", vm_state="running")
+            for i in range(count)
+        )
+        return Snapshot(host_runs=(run,), castles=castles)
+
+    provider = SequencedSnapshotProvider(
+        [snapshot_with(3), snapshot_with(1), snapshot_with(0), snapshot_with(2)]
+    )
+    app = DashboardApp(snapshot_provider=provider, poll_interval=100)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert len(app.query(".castle-pane")) == 3
+
+        for expected_count in (1, 0, 2):
+            app._request_refresh()
+            await pilot.pause()
+            await pilot.pause()
+            assert len(app.query(".castle-pane")) == expected_count

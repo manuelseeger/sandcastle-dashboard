@@ -183,13 +183,13 @@ class DashboardApp(App[None]):
         finally:
             self._refresh_in_progress = False
 
-    def action_previous_host_run(self) -> None:
-        self._cycle_host_run(-1)
+    async def action_previous_host_run(self) -> None:
+        await self._cycle_host_run(-1)
 
-    def action_next_host_run(self) -> None:
-        self._cycle_host_run(1)
+    async def action_next_host_run(self) -> None:
+        await self._cycle_host_run(1)
 
-    def _cycle_host_run(self, step: int) -> None:
+    async def _cycle_host_run(self, step: int) -> None:
         ordered = _ordered_host_runs(self.snapshot.host_runs)
         if not ordered:
             return
@@ -199,23 +199,23 @@ class DashboardApp(App[None]):
         except ValueError:
             index = 0
         self.selected_host_run_id = ids[(index + step) % len(ids)]
-        self._render_status()
+        await self._render_status()
 
-    def watch_snapshot(self, snapshot: Snapshot) -> None:
+    async def watch_snapshot(self, snapshot: Snapshot) -> None:
         ordered = _ordered_host_runs(snapshot.host_runs)
         known_ids = {run.id for run in ordered}
         if self.selected_host_run_id not in known_ids:
             self.selected_host_run_id = _newest_live_id(ordered)
-        self._render_status()
+        await self._render_status()
 
-    def _render_status(self) -> None:
+    async def _render_status(self) -> None:
         status = self.query_one("#status", Static)
         castle_status = self.query_one("#castle-status", Static)
         ordered = _ordered_host_runs(self.snapshot.host_runs)
         if not ordered:
             status.update(WAITING_MESSAGE)
             castle_status.update("")
-            self._render_castle_grid([])
+            await self._render_castle_grid([])
             return
         ids = [run.id for run in ordered]
         try:
@@ -237,7 +237,7 @@ class DashboardApp(App[None]):
             f"{self._render_resource_bars(selected)}"
         )
         castle_status.update(self.snapshot.castle_discovery_error or "")
-        self._render_castle_grid(castles)
+        await self._render_castle_grid(castles)
 
     def _render_operational_summary(self, host_run: HostRun) -> str:
         started_label = (
@@ -283,9 +283,9 @@ class DashboardApp(App[None]):
             f"MEM  [{render_bar(memory_fraction, width=BAR_WIDTH)}] {memory_label}"
         )
 
-    def _render_castle_grid(self, castles: Sequence[Castle]) -> None:
+    async def _render_castle_grid(self, castles: Sequence[Castle]) -> None:
         grid = self.query_one("#castle-grid", Grid)
-        grid.remove_children()
+        await grid.remove_children()
         if not castles:
             grid.styles.grid_size_columns = 1
             grid.styles.grid_size_rows = 1
@@ -297,7 +297,7 @@ class DashboardApp(App[None]):
         rows = math.ceil(len(castles) / columns)
         grid.styles.grid_size_columns = columns
         grid.styles.grid_size_rows = rows
-        grid.mount_all(
+        await grid.mount_all(
             Static(
                 _castle_pane_text(castle),
                 classes="castle-pane",
