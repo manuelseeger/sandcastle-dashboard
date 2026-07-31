@@ -94,7 +94,11 @@ def test_discover_host_run_processes_groups_npm_tsx_wrappers_under_orchestrator_
     repo_dir = tmp_path.parent / "repo"
     repo_dir.mkdir()
     _write_process(
-        tmp_path, pid=10, ppid=1, argv=["npm", "run", "sandcastle"], comm="npm"
+        tmp_path,
+        pid=10,
+        ppid=1,
+        argv=["npm", "--prefix", ".sandcastle", "run", "sandcastle"],
+        comm="npm",
     )
     _write_process(
         tmp_path, pid=11, ppid=10, argv=["tsx", ".sandcastle/main.mts"], comm="node"
@@ -122,13 +126,21 @@ def test_discover_host_run_processes_groups_node_launched_tsx_under_child_orches
 ):
     _write_uptime(tmp_path)
     _write_process(
-        tmp_path, pid=10, ppid=1, argv=["npm", "run", "sandcastle"], comm="npm"
+        tmp_path,
+        pid=10,
+        ppid=1,
+        argv=["npm", "--prefix", ".sandcastle", "run", "sandcastle"],
+        comm="npm",
     )
     _write_process(
         tmp_path,
         pid=11,
         ppid=10,
-        argv=["node", "/project/node_modules/.bin/tsx", ".sandcastle/main.mts"],
+        argv=[
+            "node",
+            "/project/.sandcastle/node_modules/.bin/tsx",
+            ".sandcastle/main.mts",
+        ],
     )
     _write_process(
         tmp_path,

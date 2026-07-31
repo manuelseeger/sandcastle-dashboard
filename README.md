@@ -11,6 +11,11 @@ sandcastle-dashboard
 
 ## Development
 
+Dev install:
+```sh
+uv tool install --editable --force .
+```
+
 ```sh
 uv run sandcastle-dashboard
 ```
