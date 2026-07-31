@@ -22,6 +22,7 @@
 import { execFileSync } from "node:child_process";
 import * as sandcastle from "@ai-hero/sandcastle";
 import { withDockerSbxProvider, type DockerSbxOptions } from "./docker-sbx-provider.mts";
+import { mergedSources, prepareMergeSources } from "./merge-verification.mts";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
@@ -390,40 +391,47 @@ async function runIssue(issue: Issue, root: Root, baseBranch: string): Promise<{
 
 // Give one merger exclusive access to a root branch. It processes that root's
 // dependents sequentially, while the main loop runs merger sandboxes for
-// unrelated roots concurrently. The returned IDs are mechanically verified as
-// merged and safely published/closed.
+// unrelated roots concurrently. Verification happens before isolated Git sync
+// replays commits onto the host, which changes commit IDs and loses ancestry.
 async function mergeRoot(root: Root, completed: Array<{ issue: Issue; branch: string }>): Promise<string[]> {
   // The merger works directly on the local root aggregation branch; it does
   // not create a separate synthetic merge branch.
-  await withDockerSbxProvider(sbxOptions(`merge-${root.id}`), async (provider) => {
-  const sandbox = await sandcastle.createSandbox({ branch: root.branch, sandbox: provider, hooks });
-  try {
-    const result = await sandbox.run({
-      name: `merger-${root.id}`,
-      maxIterations: 100,
-      agent: highCapAgent,
-      promptFile: "./.sandcastle/merge-prompt.md",
-      completionSignal: COMPLETE,
-      promptArgs: {
-        ROOT_BRANCH: root.branch,
-        BRANCHES: completed.map(({ branch }) => `- ${branch}`).join("\n"),
-        ISSUE_IDS: completed.map(({ issue }) => issue.id).join(","),
-      },
-    });
-    // Publishing is forbidden unless the agent explicitly completed and left
-    // the root clean. A partial batch is valid as long as these conditions hold.
-    const status = await sandbox.exec("git status --porcelain");
-    if (result.completionSignal !== COMPLETE || status.exitCode !== 0 || status.stdout.trim()) {
-      throw new Error("merger did not complete with a clean root worktree");
+  const mergedIds = await withDockerSbxProvider(sbxOptions(`merge-${root.id}`), async (provider) => {
+    const sandbox = await sandcastle.createSandbox({ branch: root.branch, sandbox: provider, hooks });
+    try {
+      // Sandboxes do not guarantee host branch/ref names. Pin each exact host
+      // tip under a private sandbox ref and give that ref to the merger.
+      const sources = await prepareMergeSources(sandbox, completed.map(({ issue, branch }) => ({
+        issueId: issue.id,
+        commit: git(["rev-parse", "--verify", `${branch}^{commit}`]),
+      })));
+      const result = await sandbox.run({
+        name: `merger-${root.id}`,
+        maxIterations: 100,
+        agent: highCapAgent,
+        promptFile: "./.sandcastle/merge-prompt.md",
+        completionSignal: COMPLETE,
+        promptArgs: {
+          ROOT_BRANCH: root.branch,
+          BRANCHES: sources.map(({ ref }) => `- ${ref}`).join("\n"),
+          ISSUE_IDS: completed.map(({ issue }) => issue.id).join(","),
+        },
+      });
+      // Publishing is forbidden unless the agent explicitly completed and left
+      // the root clean. A partial batch is valid as long as these conditions hold.
+      const status = await sandbox.exec("git status --porcelain");
+      if (result.completionSignal !== COMPLETE || status.exitCode !== 0 || status.stdout.trim()) {
+        throw new Error("merger did not complete with a clean root worktree");
+      }
+      return mergedSources(sandbox, sources);
+    } finally {
+      await sandbox.close();
     }
-  } finally {
-    await sandbox.close();
-  }
   });
 
-  // Agent output does not decide merge success. A dependent's exact tip must
-  // be an ancestor of the final root tip, naturally supporting partial batches.
-  const merged = completed.filter(({ branch }) => isAncestor(branch, root.branch));
+  // Agent output does not decide merge success. Sandbox-side ancestry is the
+  // mechanical source of truth because Sandcastle replays its commits on host.
+  const merged = completed.filter(({ issue }) => mergedIds.has(issue.id));
   if (!merged.length) return [];
 
   // Publication is the transaction boundary for issue closure. If this normal
