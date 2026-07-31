@@ -64,6 +64,7 @@ class HostRunProcessGroup:
     """One orchestration Node process and the pids grouped under it."""
 
     pid: int
+    starttime_ticks: int
     member_pids: frozenset[int]
     cwd: Path | None
     started_at: float | None
@@ -109,6 +110,7 @@ def discover_host_run_processes(
         groups.append(
             HostRunProcessGroup(
                 pid=record.pid,
+                starttime_ticks=record.starttime_ticks,
                 member_pids=frozenset(members),
                 cwd=record.cwd,
                 started_at=started_at,
@@ -276,11 +278,11 @@ def _classify(argv: list[str]) -> str:
         return "other"
     tail = argv[1:]
     for token in tail:
-        if any(token.endswith(suffix) for suffix in ORCHESTRATOR_SCRIPT_SUFFIXES):
-            return "orchestrator"
-    for token in tail:
         if Path(token).name in WRAPPER_EXECUTABLE_NAMES:
             return "wrapper"
+    for token in tail:
+        if any(token.endswith(suffix) for suffix in ORCHESTRATOR_SCRIPT_SUFFIXES):
+            return "orchestrator"
     return "other"
 
 

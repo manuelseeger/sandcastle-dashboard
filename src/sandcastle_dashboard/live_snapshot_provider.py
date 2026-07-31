@@ -113,7 +113,7 @@ class LiveHostRunSnapshotProvider:
 
     def _to_host_run(self, group: HostRunProcessGroup) -> HostRun:
         repository = resolve_repository(group.cwd, run=self._git_runner)
-        run_id = f"{group.pid}:{group.started_at}"
+        run_id = f"{group.pid}:{group.starttime_ticks}"
         cpu_percent = self._resource_sampler.sample(
             run_id, cpu_seconds=group.cpu_seconds, sampled_at=group.sampled_at
         )

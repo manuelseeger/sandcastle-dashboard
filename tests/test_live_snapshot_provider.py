@@ -18,6 +18,7 @@ def _write_stat(
     pid: int,
     ppid: int,
     state: str = "S",
+    starttime_ticks: int = 100,
     utime_ticks: int = 0,
     stime_ticks: int = 0,
     rss_pages: int = 0,
@@ -27,7 +28,7 @@ def _write_stat(
     fields[1] = str(ppid)
     fields[11] = str(utime_ticks)
     fields[12] = str(stime_ticks)
-    fields[19] = "100"
+    fields[19] = str(starttime_ticks)
     fields[21] = str(rss_pages)
     (pid_dir / "stat").write_text(f"{pid} (node) " + " ".join(fields))
 
@@ -85,6 +86,55 @@ def test_get_snapshot_associates_host_run_with_repository_from_cwd(tmp_path):
     assert host_run.pid == 42
     assert host_run.repository == Repository(path=str(repo_dir), name=repo_dir.name)
     assert host_run.ended is False
+
+
+def test_get_snapshot_keeps_a_live_host_run_stable_across_wall_clock_polls(
+    tmp_path, monkeypatch
+):
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    _write_uptime(proc_root)
+    _write_orchestrator(proc_root, pid=42, cwd=repo_dir)
+    provider = LiveHostRunSnapshotProvider(
+        proc_root=proc_root,
+        git_runner=_fake_git_runner(repo_dir),
+        sbx_runner=_fake_sbx_runner("[]", {}),
+    )
+    clock = iter((2_000.0, 2_001.0))
+    monkeypatch.setattr("sandcastle_dashboard.discovery.time.time", lambda: next(clock))
+
+    first = provider.get_snapshot()
+    second = provider.get_snapshot()
+
+    assert [run.id for run in first.host_runs] == ["42:100"]
+    assert [run.id for run in second.host_runs] == ["42:100"]
+    assert second.host_runs[0].ended is False
+
+
+def test_get_snapshot_keeps_an_ended_run_when_a_pid_is_reused(tmp_path, monkeypatch):
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    _write_uptime(proc_root)
+    _write_orchestrator(proc_root, pid=42, cwd=repo_dir)
+    provider = LiveHostRunSnapshotProvider(
+        proc_root=proc_root,
+        git_runner=_fake_git_runner(repo_dir),
+        sbx_runner=_fake_sbx_runner("[]", {}),
+    )
+    monkeypatch.setattr("sandcastle_dashboard.discovery.time.time", lambda: 2_000.0)
+    provider.get_snapshot()
+    _write_stat(proc_root / "42", pid=42, ppid=1, starttime_ticks=101)
+
+    second = provider.get_snapshot()
+
+    assert [(run.id, run.ended) for run in second.host_runs] == [
+        ("42:101", False),
+        ("42:100", True),
+    ]
 
 
 def test_get_snapshot_retains_a_host_run_that_disappears_with_unknown_outcome(tmp_path):

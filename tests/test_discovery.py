@@ -117,6 +117,33 @@ def test_discover_host_run_processes_groups_npm_tsx_wrappers_under_orchestrator_
     assert group.cwd == repo_dir
 
 
+def test_discover_host_run_processes_groups_node_launched_tsx_under_child_orchestrator(
+    tmp_path,
+):
+    _write_uptime(tmp_path)
+    _write_process(
+        tmp_path, pid=10, ppid=1, argv=["npm", "run", "sandcastle"], comm="npm"
+    )
+    _write_process(
+        tmp_path,
+        pid=11,
+        ppid=10,
+        argv=["node", "/project/node_modules/.bin/tsx", ".sandcastle/main.mts"],
+    )
+    _write_process(
+        tmp_path,
+        pid=12,
+        ppid=11,
+        argv=["node", ".sandcastle/main.mts"],
+    )
+
+    groups = discover_host_run_processes(tmp_path)
+
+    assert len(groups) == 1
+    assert groups[0].pid == 12
+    assert groups[0].member_pids == frozenset({10, 11, 12})
+
+
 def test_discover_host_run_processes_groups_descendant_processes_under_orchestrator_pid(
     tmp_path,
 ):
