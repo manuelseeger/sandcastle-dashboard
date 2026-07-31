@@ -2,7 +2,9 @@
 
 ## Implementation
 
-Build with python, preferences: 
+Build with python, managed by uv. 
+
+Lib preferences: 
 - click
 - rich
 - textual
@@ -11,8 +13,12 @@ Build with python, preferences:
 
 https://github.com/Textualize/textual
 
+### Testing
+
+Observe `docs/agents/testing-instructions.md`
+
 ## Agent skills
 
- ### Issue tracker
+### Issue tracker
 
- Issues for this repo are tracked in GitHub Issues for the current repository. See `docs/agents/issue-tracker.md`.
+Issues for this repo are tracked in GitHub Issues for the current repository. See `docs/agents/issue-tracker.md`.

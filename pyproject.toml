@@ -1,0 +1,7 @@
+[project]
+name = "sandcastle-dashboard"
+version = "0.1.0"
+description = "TUI for viewing running sandcastle sessions"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
