@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  finalTree,
   mergeSourceRef,
   mergedSources,
   prepareMergeSources,
@@ -45,14 +46,39 @@ test("merge verification rejects unsafe issue IDs and invalid commit IDs", async
   await assert.rejects(prepareMergeSources(sandbox, [{ issueId: "2", commit: "not-a-commit" }]), /invalid merge source commit/);
 });
 
-test("merge orchestration awaits sandbox ancestry verification before cleanup", async () => {
+test("merge verification reads the sandbox final tree and rejects invalid results", async () => {
+  const tree = "c".repeat(40);
+  const commands: string[] = [];
+  const sandbox: GitSandbox = {
+    async exec(command) {
+      commands.push(command);
+      return { exitCode: 0, stdout: `${tree}\n`, stderr: "" };
+    },
+  };
+
+  assert.equal(await finalTree(sandbox), tree);
+  assert.deepEqual(commands, ["git rev-parse HEAD^{tree}"]);
+
+  const brokenSandbox: GitSandbox = {
+    async exec() { return { exitCode: 0, stdout: "not-a-tree", stderr: "" }; },
+  };
+  await assert.rejects(finalTree(brokenSandbox), /could not determine sandbox final tree/);
+});
+
+test("merge orchestration verifies host tree parity before publication and cleanup", async () => {
   const source = await readFile(".sandcastle/main.mts", "utf8");
+  const sandboxTree = source.indexOf("const sandboxTree = await finalTree(sandbox);");
+  const hostTree = source.indexOf("const hostTree = git([\"rev-parse\", \"--verify\", `${root.branch}^{tree}`]);");
   const verification = source.indexOf("const verifiedSources = await mergedSources(sandbox, sources);");
+  const push = source.indexOf("push(root.branch);");
   const cleanup = source.indexOf("await sandbox.close();", verification);
 
-  assert.ok(verification >= 0, "merge verification must be awaited");
+  assert.ok(sandboxTree >= 0, "sandbox final tree must be read");
+  assert.ok(hostTree > sandboxTree, "host tree must be read after the sandbox tree");
+  assert.ok(verification > hostTree, "ancestry verification must follow tree parity validation");
+  assert.ok(push > hostTree, "publication must follow tree parity validation");
   assert.ok(cleanup > verification, "sandbox cleanup must follow merge verification");
-  assert.match(source, /merger completed but did not verify any dependent source as merged/);
+  assert.match(source, /host synchronization did not reproduce merger result/);
 });
 
 test("merge prompt instructs the agent to merge only orchestration-pinned source refs", async () => {
