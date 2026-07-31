@@ -288,6 +288,70 @@ def test_get_snapshot_leaves_branch_unset_when_it_is_missing_from_the_run_reposi
     assert snapshot.castles[0].branch is None
 
 
+def test_get_snapshot_resolves_the_current_role_log_for_a_correlated_castle(tmp_path):
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    logs_dir = repo_dir / ".sandcastle" / "logs"
+    logs_dir.mkdir(parents=True)
+    (logs_dir / "sandcastle-issue-9-implementer-42.log").write_text(
+        "Run started 10:00\nexploring the repository\n"
+    )
+    _write_uptime(proc_root)
+    _write_orchestrator(proc_root, pid=42, cwd=repo_dir)
+    listing = json.dumps([{"name": "parames-prod-42-issue-9-abc", "status": "running"}])
+    inspection = json.dumps(
+        {"state": "running", "uptime_seconds": 10.0, "active_sessions": 1}
+    )
+    provider = LiveHostRunSnapshotProvider(
+        proc_root=proc_root,
+        git_runner=_fake_git_runner(repo_dir),
+        sbx_runner=_fake_sbx_runner(
+            listing, {"parames-prod-42-issue-9-abc": inspection}
+        ),
+        branch_runner=_fake_branch_runner(["main"]),
+    )
+
+    snapshot = provider.get_snapshot()
+
+    castle = snapshot.castles[0]
+    assert castle.phase == "implementer"
+    assert castle.log_tail == ("Run started 10:00", "exploring the repository")
+    assert castle.last_activity_at is not None
+    assert snapshot.host_runs[0].last_activity_at == castle.last_activity_at
+
+
+def test_get_snapshot_reports_provisioning_before_a_role_log_exists(tmp_path):
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    (repo_dir / ".sandcastle" / "logs").mkdir(parents=True)
+    _write_uptime(proc_root)
+    _write_orchestrator(proc_root, pid=42, cwd=repo_dir)
+    listing = json.dumps([{"name": "parames-prod-42-issue-9-abc", "status": "running"}])
+    inspection = json.dumps(
+        {"state": "running", "uptime_seconds": 10.0, "active_sessions": 1}
+    )
+    provider = LiveHostRunSnapshotProvider(
+        proc_root=proc_root,
+        git_runner=_fake_git_runner(repo_dir),
+        sbx_runner=_fake_sbx_runner(
+            listing, {"parames-prod-42-issue-9-abc": inspection}
+        ),
+        branch_runner=_fake_branch_runner(["main"]),
+    )
+
+    snapshot = provider.get_snapshot()
+
+    castle = snapshot.castles[0]
+    assert castle.phase == "provisioning"
+    assert castle.log_tail == ()
+    assert castle.last_activity_at is None
+    assert snapshot.host_runs[0].last_activity_at is None
+
+
 def test_get_snapshot_reports_readable_castle_discovery_error_without_discarding_host_runs(
     tmp_path,
 ):

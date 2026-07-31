@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import time
 
-from textual.widgets import Static
+from textual.widgets import RichLog, Static
 
 from sandcastle_dashboard.app import WAITING_MESSAGE, DashboardApp
 from sandcastle_dashboard.snapshot import Castle, HostRun, Snapshot
@@ -252,7 +252,13 @@ async def test_pressing_q_exits_the_application():
 
 
 def _castle_pane_texts(app: DashboardApp) -> list[str]:
-    return [str(pane.render()) for pane in app.query(".castle-pane")]
+    return [str(header.render()) for header in app.query(".castle-header")]
+
+
+def _castle_log_lines(app: DashboardApp, pane_id: str) -> list[str]:
+    pane = app.query_one(f"#{pane_id}")
+    log_widget = pane.query_one(RichLog)
+    return [strip.text for strip in log_widget.lines]
 
 
 async def test_dashboard_app_shows_every_running_castle_for_the_selected_host_run():
@@ -297,6 +303,107 @@ async def test_dashboard_app_shows_every_running_castle_for_the_selected_host_ru
             "merger" in text and "stopped" in text and "Branch: unknown" in text
             for text in texts
         )
+
+
+async def test_dashboard_app_shows_an_issue_castles_inferred_phase():
+    run = HostRun(id="run-1", pid=42, started_at=10.0)
+    castle = Castle(
+        name="parames-prod-42-issue-9-abc",
+        host_run_id="run-1",
+        scope="issue",
+        issue_number=9,
+        vm_state="running",
+        phase="reviewer",
+    )
+    provider = StaticSnapshotProvider(Snapshot(host_runs=(run,), castles=(castle,)))
+    app = DashboardApp(snapshot_provider=provider, poll_interval=100)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        text = _castle_pane_texts(app)[0]
+        assert "phase: reviewer" in text
+
+
+async def test_dashboard_app_shows_provisioning_before_a_role_log_is_active():
+    run = HostRun(id="run-1", pid=42, started_at=10.0)
+    castle = Castle(
+        name="parames-prod-42-issue-9-abc",
+        host_run_id="run-1",
+        scope="issue",
+        issue_number=9,
+        vm_state="running",
+        phase="provisioning",
+    )
+    provider = StaticSnapshotProvider(Snapshot(host_runs=(run,), castles=(castle,)))
+    app = DashboardApp(snapshot_provider=provider, poll_interval=100)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        text = _castle_pane_texts(app)[0]
+        assert "phase: provisioning" in text
+
+
+async def test_dashboard_app_shows_each_castles_last_activity_time():
+    run = HostRun(id="run-1", pid=42, started_at=10.0)
+    castle = Castle(
+        name="parames-prod-42-issue-9-abc",
+        host_run_id="run-1",
+        scope="issue",
+        issue_number=9,
+        vm_state="running",
+        last_activity_at=1_120.0,
+    )
+    provider = StaticSnapshotProvider(Snapshot(host_runs=(run,), castles=(castle,)))
+    app = DashboardApp(
+        snapshot_provider=provider, poll_interval=100, clock=lambda: 1_125.0
+    )
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        text = _castle_pane_texts(app)[0]
+        assert "Last activity: 5s ago" in text
+
+
+async def test_dashboard_app_shows_the_host_runs_last_activity_time():
+    run = HostRun(id="run-1", pid=42, started_at=10.0, last_activity_at=1_100.0)
+    provider = StaticSnapshotProvider(Snapshot(host_runs=(run,)))
+    app = DashboardApp(
+        snapshot_provider=provider, poll_interval=100, clock=lambda: 1_125.0
+    )
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        content = app.query_one("#status", Static).content
+        assert "Last activity: 25s ago" in content
+
+
+async def test_dashboard_app_shows_a_bounded_live_log_tail_for_a_castle():
+    run = HostRun(id="run-1", pid=42, started_at=10.0)
+    castle = Castle(
+        name="parames-prod-42-issue-9-abc",
+        host_run_id="run-1",
+        scope="issue",
+        issue_number=9,
+        vm_state="running",
+        phase="implementer",
+        log_tail=("Run started 10:00", "exploring the repository", "running tests"),
+    )
+    provider = StaticSnapshotProvider(Snapshot(host_runs=(run,), castles=(castle,)))
+    app = DashboardApp(snapshot_provider=provider, poll_interval=100)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        lines = _castle_log_lines(app, "castle-parames-prod-42-issue-9-abc")
+        assert lines == [
+            "Run started 10:00",
+            "exploring the repository",
+            "running tests",
+        ]
 
 
 async def test_dashboard_app_shows_running_castle_count_in_host_run_summary():

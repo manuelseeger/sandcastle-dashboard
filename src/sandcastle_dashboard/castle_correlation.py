@@ -85,6 +85,7 @@ def correlate_castles(
                 root_number=_as_int(parsed.scope_id)
                 if parsed.scope == "merger"
                 else None,
+                scope_id=parsed.scope_id,
                 vm_state=inspection.vm_state,
                 uptime_seconds=inspection.uptime_seconds,
                 session_count=inspection.session_count,

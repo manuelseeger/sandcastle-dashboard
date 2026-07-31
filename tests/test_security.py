@@ -15,6 +15,8 @@ import pytest
 
 from sandcastle_dashboard.discovery import ProcessRecord, discover_host_run_processes
 from sandcastle_dashboard.live_snapshot_provider import LiveHostRunSnapshotProvider
+from sandcastle_dashboard.logs import resolve_castle_log
+from sandcastle_dashboard.snapshot import Castle
 
 SECRET = "super-secret-token-do-not-leak"
 
@@ -141,3 +143,26 @@ def test_discovery_never_reads_environ_for_non_orchestrator_processes(
     groups = discover_host_run_processes(proc_root)
 
     assert len(groups) == 1
+
+
+def test_resolving_a_castle_log_never_writes_a_copy_of_its_content_to_disk(tmp_path):
+    """Raw log content is sensitive and must stay in memory only; reading it
+    for display must never create a persisted copy anywhere on disk."""
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    log_path = logs_dir / "sandcastle-issue-9-implementer-9.log"
+    log_path.write_text(f"Run started 10:00\n{SECRET}\n")
+    castle = Castle(
+        name="parames-prod-9-issue-9-abc",
+        host_run_id="run-1",
+        scope="issue",
+        issue_number=9,
+        vm_state="running",
+    )
+    before = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*"))
+
+    selection = resolve_castle_log(logs_dir, castle)
+
+    assert SECRET in selection.log_tail[-1]
+    after = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*"))
+    assert after == before

@@ -11,9 +11,9 @@ from typing import ClassVar
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Container, Grid
+from textual.containers import Container, Grid, Vertical
 from textual.reactive import reactive
-from textual.widgets import Footer, Header, Static
+from textual.widgets import Footer, Header, RichLog, Static
 
 from sandcastle_dashboard import system_resources
 from sandcastle_dashboard.bars import render_bar
@@ -58,16 +58,6 @@ def _format_scope(castle: Castle) -> str:
 def _format_branch(castle: Castle) -> str:
     return (
         f"Branch: {castle.branch}" if castle.branch is not None else "Branch: unknown"
-    )
-
-
-def _castle_pane_text(castle: Castle) -> str:
-    sessions = "unknown" if castle.session_count is None else str(castle.session_count)
-    return (
-        f"{castle.name}\n"
-        f"{_format_scope(castle)} • {castle.vm_state}\n"
-        f"{_format_uptime(castle.uptime_seconds)} • {sessions} session(s)\n"
-        f"{_format_branch(castle)}"
     )
 
 
@@ -127,6 +117,15 @@ class DashboardApp(App[None]):
         border: round $primary;
         height: 1fr;
         padding: 0 1;
+    }
+    .castle-header {
+        height: auto;
+    }
+    .castle-log {
+        height: 1fr;
+        border: none;
+        padding: 0;
+        scrollbar-size: 0 0;
     }
     """
 
@@ -261,8 +260,14 @@ class DashboardApp(App[None]):
         return (
             f"State: {host_run.process_state}   "
             f"Started: {started_label}   "
-            f"Elapsed: {elapsed_label}"
+            f"Elapsed: {elapsed_label}   "
+            f"Last activity: {self._format_relative_time(host_run.last_activity_at)}"
         )
+
+    def _format_relative_time(self, timestamp: float | None) -> str:
+        if timestamp is None:
+            return "no activity yet"
+        return f"{format_duration(max(0.0, self._clock() - timestamp))} ago"
 
     def _render_resource_bars(self, host_run: HostRun) -> str:
         cpu_capacity = self._cpu_count * 100
@@ -305,11 +310,28 @@ class DashboardApp(App[None]):
         rows = math.ceil(len(castles) / columns)
         grid.styles.grid_size_columns = columns
         grid.styles.grid_size_rows = rows
-        await grid.mount_all(
-            Static(
-                _castle_pane_text(castle),
-                classes="castle-pane",
-                id=f"castle-{_slug(castle.name)}",
-            )
-            for castle in castles
+        panes = [(self._build_castle_pane(castle), castle) for castle in castles]
+        await grid.mount_all(pane for pane, _ in panes)
+        for pane, castle in panes:
+            log_widget = pane.query_one(RichLog)
+            log_widget.clear()
+            for line in castle.log_tail:
+                log_widget.write(line)
+
+    def _build_castle_pane(self, castle: Castle) -> Vertical:
+        sessions = (
+            "unknown" if castle.session_count is None else str(castle.session_count)
+        )
+        header_text = (
+            f"{castle.name}\n"
+            f"{_format_scope(castle)} • phase: {castle.phase} • {castle.vm_state}\n"
+            f"{_format_uptime(castle.uptime_seconds)} • {sessions} session(s)\n"
+            f"{_format_branch(castle)}\n"
+            f"Last activity: {self._format_relative_time(castle.last_activity_at)}"
+        )
+        return Vertical(
+            Static(header_text, classes="castle-header", markup=False),
+            RichLog(classes="castle-log", markup=False, highlight=False, wrap=False),
+            classes="castle-pane",
+            id=f"castle-{_slug(castle.name)}",
         )

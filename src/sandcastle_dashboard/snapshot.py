@@ -42,6 +42,7 @@ class HostRun:
     memory_bytes: int | None = None
     invocation_id: str | None = None
     deployment_id: str | None = None
+    last_activity_at: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,9 +55,13 @@ class Castle:
     vm_state: str
     issue_number: int | None = None
     root_number: int | None = None
+    scope_id: str | None = None
     branch: str | None = None
     uptime_seconds: float | None = None
     session_count: int | None = None
+    phase: str = "provisioning"
+    last_activity_at: float | None = None
+    log_tail: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)

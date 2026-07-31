@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+from collections.abc import Sequence
 from pathlib import Path
 
 from sandcastle_dashboard.branch_identity import (
@@ -16,6 +18,7 @@ from sandcastle_dashboard.discovery import (
     discover_host_run_processes,
 )
 from sandcastle_dashboard.host_run_tracker import HostRunTracker
+from sandcastle_dashboard.logs import resolve_castle_log
 from sandcastle_dashboard.repository import (
     GitRunner,
     resolve_repository,
@@ -23,7 +26,9 @@ from sandcastle_dashboard.repository import (
 )
 from sandcastle_dashboard.resource_usage import ResourceUsageSampler
 from sandcastle_dashboard.sbx import SbxRunner, discover_running_castles, run_sbx
-from sandcastle_dashboard.snapshot import HostRun, Snapshot
+from sandcastle_dashboard.snapshot import Castle, HostRun, Snapshot
+
+_LOGS_SUBDIRECTORY = Path(".sandcastle") / "logs"
 
 
 class LiveHostRunSnapshotProvider:
@@ -60,11 +65,41 @@ class LiveHostRunSnapshotProvider:
                 path, run=self._branch_runner
             ),
         )
+        host_runs_by_id = {run.id: run for run in host_runs}
+        castles = tuple(
+            self._resolve_log(castle, host_runs_by_id.get(castle.host_run_id))
+            for castle in castles
+        )
+        host_runs = tuple(self._attach_last_activity(run, castles) for run in host_runs)
         return Snapshot(
             host_runs=host_runs,
             castles=castles,
             castle_discovery_error=castle_discovery.error,
         )
+
+    def _resolve_log(self, castle: Castle, host_run: HostRun | None) -> Castle:
+        if host_run is None or host_run.repository is None:
+            return castle
+        logs_dir = Path(host_run.repository.path) / _LOGS_SUBDIRECTORY
+        selection = resolve_castle_log(logs_dir, castle)
+        return dataclasses.replace(
+            castle,
+            phase=selection.phase,
+            last_activity_at=selection.last_activity_at,
+            log_tail=selection.log_tail,
+        )
+
+    def _attach_last_activity(
+        self, host_run: HostRun, castles: Sequence[Castle]
+    ) -> HostRun:
+        activity_times = [
+            castle.last_activity_at
+            for castle in castles
+            if castle.host_run_id == host_run.id and castle.last_activity_at is not None
+        ]
+        if not activity_times:
+            return host_run
+        return dataclasses.replace(host_run, last_activity_at=max(activity_times))
 
     def _to_host_run(self, group: HostRunProcessGroup) -> HostRun:
         repository = resolve_repository(group.cwd, run=self._git_runner)
