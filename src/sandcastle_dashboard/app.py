@@ -14,8 +14,7 @@ from textual.widgets import Footer, Header, Static
 from sandcastle_dashboard.snapshot import Snapshot, SnapshotProvider
 
 WAITING_MESSAGE = (
-    "No Host Run detected.\n"
-    "Waiting for a Sandcastle orchestration run to start..."
+    "No Host Run detected.\nWaiting for a Sandcastle orchestration run to start..."
 )
 
 
@@ -72,7 +71,9 @@ class DashboardApp(App[None]):
             return
         self._refresh_in_progress = True
         try:
-            self.snapshot = await asyncio.to_thread(self._snapshot_provider.get_snapshot)
+            self.snapshot = await asyncio.to_thread(
+                self._snapshot_provider.get_snapshot
+            )
         finally:
             self._refresh_in_progress = False
 
