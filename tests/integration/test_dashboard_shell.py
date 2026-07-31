@@ -521,10 +521,46 @@ class SequencedSnapshotProvider:
         return self._snapshots[index]
 
 
+async def test_dashboard_app_preserves_castle_panes_when_a_refresh_updates_them():
+    run = HostRun(id="run-1", pid=42, started_at=10.0)
+    initial = Castle(
+        name="c1",
+        host_run_id="run-1",
+        scope="issue",
+        vm_state="running",
+        phase="implementer",
+        log_tail=("starting work",),
+    )
+    updated = Castle(
+        name="c1",
+        host_run_id="run-1",
+        scope="issue",
+        vm_state="running",
+        phase="reviewer",
+        log_tail=("reviewing changes",),
+    )
+    provider = SwitchingSnapshotProvider(
+        before=Snapshot(host_runs=(run,), castles=(initial,)),
+        after=Snapshot(host_runs=(run,), castles=(updated,)),
+    )
+    app = DashboardApp(snapshot_provider=provider, poll_interval=100)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        pane = app.query_one("#castle-c1")
+
+        provider.switch()
+        app._request_refresh()
+        await pilot.pause()
+        await pilot.pause()
+
+        assert app.query_one("#castle-c1") is pane
+        assert "phase: reviewer" in _castle_pane_texts(app)[0]
+        assert _castle_log_lines(app, "castle-c1") == ["reviewing changes"]
+
+
 async def test_dashboard_app_updates_castle_grid_across_refreshes_without_crashing():
-    """A running Castle can reappear with the same name across polls (for
-    example, a session count changing). Re-mounting must not race with the
-    previous poll's teardown and must never leave stale or duplicate panes."""
+    """A changing Castle collection must never leave stale or duplicate panes."""
     run = HostRun(id="run-1", pid=42, started_at=10.0)
 
     def snapshot_with(count: int) -> Snapshot:

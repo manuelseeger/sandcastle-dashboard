@@ -329,8 +329,8 @@ class DashboardApp(App[None]):
         castle_status = self.query_one("#castle-status", Static)
         ordered = _ordered_host_runs(self.snapshot.host_runs)
         if not ordered:
-            status.update(WAITING_MESSAGE)
-            castle_status.update("")
+            self._update_static(status, WAITING_MESSAGE)
+            self._update_static(castle_status, "")
             await self._render_castle_grid([])
             return
         ids = [run.id for run in ordered]
@@ -346,14 +346,21 @@ class DashboardApp(App[None]):
         castles = _castles_for_host_run(self.snapshot.castles, selected.id)
         castle_count = len(castles)
         castle_noun = "castle" if castle_count == 1 else "castles"
-        status.update(
+        self._update_static(
+            status,
             f"Host Run {index + 1}/{len(ordered)} — pid {selected.pid} "
             f"• {repo_name} • {outcome} • {castle_count} running {castle_noun}\n"
             f"{self._render_operational_summary(selected)}\n"
-            f"{self._render_resource_bars(selected)}"
+            f"{self._render_resource_bars(selected)}",
         )
-        castle_status.update(self.snapshot.castle_discovery_error or "")
+        self._update_static(castle_status, self.snapshot.castle_discovery_error or "")
         await self._render_castle_grid(castles)
+
+    @staticmethod
+    def _update_static(widget: Static, content: str) -> None:
+        """Update a text widget only when its displayed value changed."""
+        if widget.content != content:
+            widget.update(content)
 
     def _render_operational_summary(self, host_run: HostRun) -> str:
         started_label = (
@@ -406,6 +413,7 @@ class DashboardApp(App[None]):
         )
 
     async def _render_castle_grid(self, castles: Sequence[Castle]) -> None:
+        """Apply Castle changes in place so polling does not redraw the whole grid."""
         grid = self.query_one("#castle-grid", Grid)
         focused = self.screen.focused
         previous_panes = list(grid.query(CastlePane))
@@ -417,57 +425,94 @@ class DashboardApp(App[None]):
             else None
         )
         previous_name = focused.castle_name if previous_index is not None else None
+        existing_panes = {pane.castle_name: pane for pane in previous_panes}
+        desired_names = {castle.name for castle in castles}
 
-        await grid.remove_children()
+        panes_to_remove = [
+            pane for name, pane in existing_panes.items() if name not in desired_names
+        ]
+        if panes_to_remove:
+            await grid.remove_children(panes_to_remove)
+
+        new_panes: list[CastlePane] = []
+        panes: list[tuple[CastlePane, Castle]] = []
+        for castle in castles:
+            pane = existing_panes.get(castle.name)
+            if pane is None:
+                pane = self._build_castle_pane(castle)
+                new_panes.append(pane)
+            panes.append((pane, castle))
+        if new_panes:
+            await grid.mount_all(new_panes)
+
         self._grid_host_run_id = self.selected_host_run_id
         if not castles:
-            self.set_focus(None)
-            grid.styles.grid_size_columns = 1
-            grid.styles.grid_size_rows = 1
+            if isinstance(focused, CastlePane):
+                self.set_focus(None)
+            self._set_grid_dimensions(grid, columns=1, rows=1)
             castle_status = self.query_one("#castle-status", Static)
             if not castle_status.content:
-                castle_status.update(NO_CASTLES_MESSAGE)
+                self._update_static(castle_status, NO_CASTLES_MESSAGE)
             return
+
         columns, rows = _grid_dimensions(len(castles))
-        grid.styles.grid_size_columns = columns
-        grid.styles.grid_size_rows = rows
-        panes = [(self._build_castle_pane(castle), castle) for castle in castles]
-        await grid.mount_all(pane for pane, _ in panes)
+        self._set_grid_dimensions(grid, columns=columns, rows=rows)
+        self._order_panes(grid, [pane for pane, _ in panes])
         for pane, castle in panes:
+            self._update_castle_pane(pane, castle)
+
+        if previous_name is not None and previous_name in desired_names:
+            return
+        focus_index = min(previous_index, len(panes) - 1) if previous_index else 0
+        panes[focus_index][0].focus()
+
+    @staticmethod
+    def _set_grid_dimensions(grid: Grid, columns: int, rows: int) -> None:
+        if grid.styles.grid_size_columns != columns:
+            grid.styles.grid_size_columns = columns
+        if grid.styles.grid_size_rows != rows:
+            grid.styles.grid_size_rows = rows
+
+    @staticmethod
+    def _order_panes(grid: Grid, panes: Sequence[CastlePane]) -> None:
+        for index, pane in enumerate(panes):
+            children = list(grid.children)
+            if children[index] is not pane:
+                grid.move_child(pane, before=children[index])
+
+    def _update_castle_pane(self, pane: CastlePane, castle: Castle) -> None:
+        header = pane.query_one(".castle-header", Static)
+        self._update_static(header, self._castle_header_text(castle))
+        if pane.log_tail != castle.log_tail:
             log_widget = pane.query_one(CastleLog)
             log_widget.clear()
             for line in castle.log_tail:
                 log_widget.write(line)
-
-        if previous_name is not None:
-            focus_index = next(
-                (
-                    index
-                    for index, (pane, _) in enumerate(panes)
-                    if pane.castle_name == previous_name
-                ),
-                min(previous_index, len(panes) - 1),
-            )
-        else:
-            focus_index = 0
-        panes[focus_index][0].focus()
+            pane.log_tail = castle.log_tail
 
     def _build_castle_pane(self, castle: Castle) -> CastlePane:
+        pane = CastlePane(
+            Static(
+                self._castle_header_text(castle),
+                classes="castle-header",
+                markup=False,
+            ),
+            CastleLog(classes="castle-log", markup=False, highlight=False, wrap=False),
+            classes="castle-pane",
+            id=f"castle-{_slug(castle.name)}",
+        )
+        pane.castle_name = castle.name
+        pane.log_tail: tuple[str, ...] | None = None
+        return pane
+
+    def _castle_header_text(self, castle: Castle) -> str:
         sessions = (
             "unknown" if castle.session_count is None else str(castle.session_count)
         )
-        header_text = (
+        return (
             f"{castle.name}\n"
             f"{_format_scope(castle)} • phase: {castle.phase} • {castle.vm_state}\n"
             f"{_format_uptime(castle.uptime_seconds)} • {sessions} session(s)\n"
             f"{_format_branch(castle)}\n"
             f"Last activity: {self._format_relative_time(castle.last_activity_at)}"
         )
-        pane = CastlePane(
-            Static(header_text, classes="castle-header", markup=False),
-            CastleLog(classes="castle-log", markup=False, highlight=False, wrap=False),
-            classes="castle-pane",
-            id=f"castle-{_slug(castle.name)}",
-        )
-        pane.castle_name = castle.name
-        return pane
