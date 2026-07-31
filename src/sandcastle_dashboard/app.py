@@ -69,6 +69,25 @@ def _castles_for_host_run(
     return [castle for castle in castles if castle.host_run_id == host_run_id]
 
 
+def _grid_dimensions(castle_count: int) -> tuple[int, int]:
+    """Return the adaptive grid dimensions for a non-empty Castle collection."""
+    columns = math.ceil(math.sqrt(castle_count))
+    return columns, math.ceil(castle_count / columns)
+
+
+class CastlePane(Vertical):
+    """A focusable Castle grid cell identified by its stable Castle name."""
+
+    can_focus = True
+    can_focus_children = False
+
+
+class CastleLog(RichLog):
+    """A display-only log that does not intercept grid navigation keys."""
+
+    can_focus = False
+
+
 CPU_UNKNOWN_LABEL = "measuring…"
 MEMORY_UNKNOWN_LABEL = "unknown"
 BAR_WIDTH = 20
@@ -118,6 +137,10 @@ class DashboardApp(App[None]):
         height: 1fr;
         padding: 0 1;
     }
+    .castle-pane:focus {
+        background: $accent 20%;
+        border: heavy $accent;
+    }
     .castle-header {
         height: auto;
     }
@@ -134,6 +157,10 @@ class DashboardApp(App[None]):
         Binding("q", "quit", "Quit"),
         Binding("[", "previous_host_run", "Prev Run"),
         Binding("]", "next_host_run", "Next Run"),
+        Binding("up", "focus_castle_up", "Up"),
+        Binding("down", "focus_castle_down", "Down"),
+        Binding("left", "focus_castle_left", "Left"),
+        Binding("right", "focus_castle_right", "Right"),
     ]
 
     snapshot: reactive[Snapshot] = reactive(Snapshot(), always_update=True)
@@ -160,6 +187,7 @@ class DashboardApp(App[None]):
             if total_memory_bytes is not None
             else system_resources.total_memory_bytes()
         )
+        self._grid_host_run_id: str | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -196,6 +224,40 @@ class DashboardApp(App[None]):
     async def action_next_host_run(self) -> None:
         await self._cycle_host_run(1)
 
+    def action_focus_castle_up(self) -> None:
+        self._move_castle_focus("up")
+
+    def action_focus_castle_down(self) -> None:
+        self._move_castle_focus("down")
+
+    def action_focus_castle_left(self) -> None:
+        self._move_castle_focus("left")
+
+    def action_focus_castle_right(self) -> None:
+        self._move_castle_focus("right")
+
+    def _move_castle_focus(self, direction: str) -> None:
+        panes = list(self.query("#castle-grid CastlePane"))
+        if not panes:
+            return
+        focused = self.screen.focused
+        if not isinstance(focused, CastlePane) or focused not in panes:
+            panes[0].focus()
+            return
+        index = panes.index(focused)
+        columns, _ = _grid_dimensions(len(panes))
+        target_index = index
+        if direction == "left" and index % columns:
+            target_index = index - 1
+        elif direction == "right" and index % columns < columns - 1:
+            target_index = index + 1
+        elif direction == "up" and index >= columns:
+            target_index = index - columns
+        elif direction == "down" and index + columns < len(panes):
+            target_index = index + columns
+        if target_index < len(panes):
+            panes[target_index].focus()
+
     async def _cycle_host_run(self, step: int) -> None:
         ordered = _ordered_host_runs(self.snapshot.host_runs)
         if not ordered:
@@ -209,6 +271,8 @@ class DashboardApp(App[None]):
         await self._render_status()
 
     async def watch_snapshot(self, snapshot: Snapshot) -> None:
+        if not self.is_running:
+            return
         ordered = _ordered_host_runs(snapshot.host_runs)
         known_ids = {run.id for run in ordered}
         if self.selected_host_run_id not in known_ids:
@@ -298,27 +362,52 @@ class DashboardApp(App[None]):
 
     async def _render_castle_grid(self, castles: Sequence[Castle]) -> None:
         grid = self.query_one("#castle-grid", Grid)
+        focused = self.screen.focused
+        previous_panes = list(grid.query(CastlePane))
+        previous_index = (
+            previous_panes.index(focused)
+            if isinstance(focused, CastlePane)
+            and focused in previous_panes
+            and self._grid_host_run_id == self.selected_host_run_id
+            else None
+        )
+        previous_name = focused.castle_name if previous_index is not None else None
+
         await grid.remove_children()
+        self._grid_host_run_id = self.selected_host_run_id
         if not castles:
+            self.set_focus(None)
             grid.styles.grid_size_columns = 1
             grid.styles.grid_size_rows = 1
             castle_status = self.query_one("#castle-status", Static)
             if not castle_status.content:
                 castle_status.update(NO_CASTLES_MESSAGE)
             return
-        columns = math.ceil(math.sqrt(len(castles)))
-        rows = math.ceil(len(castles) / columns)
+        columns, rows = _grid_dimensions(len(castles))
         grid.styles.grid_size_columns = columns
         grid.styles.grid_size_rows = rows
         panes = [(self._build_castle_pane(castle), castle) for castle in castles]
         await grid.mount_all(pane for pane, _ in panes)
         for pane, castle in panes:
-            log_widget = pane.query_one(RichLog)
+            log_widget = pane.query_one(CastleLog)
             log_widget.clear()
             for line in castle.log_tail:
                 log_widget.write(line)
 
-    def _build_castle_pane(self, castle: Castle) -> Vertical:
+        if previous_name is not None:
+            focus_index = next(
+                (
+                    index
+                    for index, (pane, _) in enumerate(panes)
+                    if pane.castle_name == previous_name
+                ),
+                min(previous_index, len(panes) - 1),
+            )
+        else:
+            focus_index = 0
+        panes[focus_index][0].focus()
+
+    def _build_castle_pane(self, castle: Castle) -> CastlePane:
         sessions = (
             "unknown" if castle.session_count is None else str(castle.session_count)
         )
@@ -329,9 +418,11 @@ class DashboardApp(App[None]):
             f"{_format_branch(castle)}\n"
             f"Last activity: {self._format_relative_time(castle.last_activity_at)}"
         )
-        return Vertical(
+        pane = CastlePane(
             Static(header_text, classes="castle-header", markup=False),
-            RichLog(classes="castle-log", markup=False, highlight=False, wrap=False),
+            CastleLog(classes="castle-log", markup=False, highlight=False, wrap=False),
             classes="castle-pane",
             id=f"castle-{_slug(castle.name)}",
         )
+        pane.castle_name = castle.name
+        return pane

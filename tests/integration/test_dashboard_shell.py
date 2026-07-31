@@ -38,6 +38,9 @@ class SwitchingSnapshotProvider:
     def switch(self) -> None:
         self._snapshot = self._after
 
+    def switch_to(self, snapshot: Snapshot) -> None:
+        self._snapshot = snapshot
+
 
 class ConcurrencyTrackingSnapshotProvider:
     """Blocks on every call and records the maximum concurrent call count."""
@@ -80,6 +83,10 @@ async def test_dashboard_app_with_empty_snapshot_shows_waiting_state_and_shortcu
         assert shortcuts.get("q") == "Quit"
         assert shortcuts.get("left_square_bracket") == "Prev Run"
         assert shortcuts.get("right_square_bracket") == "Next Run"
+        assert shortcuts.get("up") == "Up"
+        assert shortcuts.get("down") == "Down"
+        assert shortcuts.get("left") == "Left"
+        assert shortcuts.get("right") == "Right"
 
 
 async def test_dashboard_app_applies_new_snapshots_automatically_without_blocking():
@@ -515,3 +522,158 @@ async def test_dashboard_app_updates_castle_grid_across_refreshes_without_crashi
             await pilot.pause()
             await pilot.pause()
             assert len(app.query(".castle-pane")) == expected_count
+
+
+def _focused_castle_name(app: DashboardApp) -> str | None:
+    return getattr(app.screen.focused, "castle_name", None)
+
+
+async def test_castle_grid_arrow_keys_move_spatially_with_incomplete_rows_after_resize():
+    run = HostRun(id="run-1", pid=42, started_at=10.0)
+    castles = tuple(
+        Castle(name=f"c{index}", host_run_id="run-1", scope="issue", vm_state="running")
+        for index in range(5)
+    )
+    app = DashboardApp(
+        snapshot_provider=StaticSnapshotProvider(
+            Snapshot(host_runs=(run,), castles=castles)
+        ),
+        poll_interval=100,
+    )
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert _focused_castle_name(app) == "c0"
+        panes = list(app.query(".castle-pane"))
+        assert app.screen.focused.styles.border.top[0] == "heavy"
+        assert panes[1].styles.border.top[0] == "round"
+
+        await pilot.resize_terminal(100, 40)
+        await pilot.press("down")
+        assert _focused_castle_name(app) == "c3"
+        await pilot.press("left")
+        assert _focused_castle_name(app) == "c3"
+        await pilot.press("right")
+        assert _focused_castle_name(app) == "c4"
+        await pilot.press("up")
+        assert _focused_castle_name(app) == "c1"
+        await pilot.press("right")
+        assert _focused_castle_name(app) == "c2"
+        await pilot.press("right")
+        assert _focused_castle_name(app) == "c2"
+        await pilot.press("down")
+        assert _focused_castle_name(app) == "c2"
+
+
+async def test_castle_grid_arrow_keys_do_not_move_focus_for_a_single_pane():
+    run = HostRun(id="run-1", pid=42, started_at=10.0)
+    castle = Castle(name="c1", host_run_id="run-1", scope="issue", vm_state="running")
+    app = DashboardApp(
+        snapshot_provider=StaticSnapshotProvider(
+            Snapshot(host_runs=(run,), castles=(castle,))
+        ),
+        poll_interval=100,
+    )
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        for key in ("up", "down", "left", "right"):
+            await pilot.press(key)
+            assert _focused_castle_name(app) == "c1"
+
+
+async def test_castle_grid_refresh_preserves_identity_then_falls_back_and_resets_for_run():
+    first_run = HostRun(id="run-1", pid=1, started_at=10.0)
+    second_run = HostRun(id="run-2", pid=2, started_at=20.0)
+    provider = SwitchingSnapshotProvider(
+        before=Snapshot(
+            host_runs=(first_run,),
+            castles=tuple(
+                Castle(
+                    name=name,
+                    host_run_id="run-1",
+                    scope="issue",
+                    vm_state="running",
+                )
+                for name in ("a", "b", "c")
+            ),
+        ),
+        after=Snapshot(
+            host_runs=(first_run, second_run),
+            castles=(
+                Castle(
+                    name="a", host_run_id="run-1", scope="issue", vm_state="running"
+                ),
+                Castle(
+                    name="new",
+                    host_run_id="run-1",
+                    scope="issue",
+                    vm_state="running",
+                ),
+                Castle(
+                    name="b",
+                    host_run_id="run-1",
+                    scope="issue",
+                    vm_state="running",
+                    phase="reviewer",
+                ),
+                Castle(
+                    name="run-2-castle",
+                    host_run_id="run-2",
+                    scope="planner",
+                    vm_state="running",
+                ),
+            ),
+        ),
+    )
+    app = DashboardApp(snapshot_provider=provider, poll_interval=100)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("right")
+        assert _focused_castle_name(app) == "b"
+
+        provider.switch()
+        app._request_refresh()
+        await pilot.pause()
+        await pilot.pause()
+        assert _focused_castle_name(app) == "b"
+        assert any(
+            "b" in text and "phase: reviewer" in text
+            for text in _castle_pane_texts(app)
+        )
+
+        provider.switch_to(
+            Snapshot(
+                host_runs=(first_run, second_run),
+                castles=(
+                    Castle(
+                        name="a",
+                        host_run_id="run-1",
+                        scope="issue",
+                        vm_state="running",
+                    ),
+                    Castle(
+                        name="new",
+                        host_run_id="run-1",
+                        scope="issue",
+                        vm_state="running",
+                    ),
+                    Castle(
+                        name="run-2-castle",
+                        host_run_id="run-2",
+                        scope="planner",
+                        vm_state="running",
+                    ),
+                ),
+            )
+        )
+        app._request_refresh()
+        await pilot.pause()
+        await pilot.pause()
+        assert _focused_castle_name(app) == "new"
+
+        await pilot.press("]")
+        assert app.selected_host_run_id == "run-2"
+        assert _focused_castle_name(app) == "run-2-castle"
