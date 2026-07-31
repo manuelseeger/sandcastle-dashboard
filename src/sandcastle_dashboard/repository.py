@@ -34,7 +34,7 @@ def resolve_repository(
         return None
     try:
         result = run(cwd)
-    except (OSError, subprocess.SubprocessError):
+    except OSError, subprocess.SubprocessError:
         return None
     if result.returncode != 0:
         return None

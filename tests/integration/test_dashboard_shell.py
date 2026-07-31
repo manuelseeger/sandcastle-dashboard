@@ -285,7 +285,9 @@ async def test_dashboard_app_shows_every_running_castle_for_the_selected_host_ru
         panes = app.query(".castle-pane")
         assert len(panes) == 2
         texts = _castle_pane_texts(app)
-        assert any("issue" in text and "9" in text and "running" in text for text in texts)
+        assert any(
+            "issue" in text and "9" in text and "running" in text for text in texts
+        )
         assert any("merger" in text and "stopped" in text for text in texts)
 
 
@@ -308,7 +310,9 @@ async def test_dashboard_app_only_shows_castles_belonging_to_the_selected_host_r
     selected = HostRun(id="run-selected", pid=1, started_at=20.0)
     other = HostRun(id="run-other", pid=2, started_at=10.0)
     castles = (
-        Castle(name="c1", host_run_id="run-selected", scope="issue", vm_state="running"),
+        Castle(
+            name="c1", host_run_id="run-selected", scope="issue", vm_state="running"
+        ),
         Castle(name="c2", host_run_id="run-other", scope="planner", vm_state="running"),
     )
     provider = StaticSnapshotProvider(
@@ -333,7 +337,10 @@ async def test_dashboard_app_shows_a_message_when_the_selected_host_run_has_no_c
         await pilot.pause()
 
         assert len(app.query(".castle-pane")) == 0
-        assert "no running castles" in app.query_one("#castle-status", Static).content.lower()
+        assert (
+            "no running castles"
+            in app.query_one("#castle-status", Static).content.lower()
+        )
 
 
 async def test_dashboard_app_shows_readable_status_when_castle_discovery_fails():

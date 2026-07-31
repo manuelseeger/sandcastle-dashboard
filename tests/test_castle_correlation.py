@@ -44,7 +44,9 @@ def test_parse_castle_name_returns_no_scope_for_an_unrecognized_name():
 
 def test_correlate_castles_matches_by_pid_when_no_explicit_invocation_id():
     host_run = HostRun(id="run-1", pid=4821)
-    inspection = CastleInspection(name="parames-prod-4821-issue-9-a1b2c3", vm_state="running")
+    inspection = CastleInspection(
+        name="parames-prod-4821-issue-9-a1b2c3", vm_state="running"
+    )
 
     castles = correlate_castles([inspection], [host_run])
 
@@ -59,7 +61,9 @@ def test_correlate_castles_matches_by_pid_when_no_explicit_invocation_id():
 def test_correlate_castles_prefers_explicit_invocation_id_over_pid_lookalike():
     matching_run = HostRun(id="run-explicit", pid=1, invocation_id="9001")
     pid_lookalike_run = HostRun(id="run-pid", pid=9001)
-    inspection = CastleInspection(name="parames-prod-9001-issue-3-xyz", vm_state="running")
+    inspection = CastleInspection(
+        name="parames-prod-9001-issue-3-xyz", vm_state="running"
+    )
 
     castles = correlate_castles([inspection], [matching_run, pid_lookalike_run])
 
@@ -69,7 +73,9 @@ def test_correlate_castles_prefers_explicit_invocation_id_over_pid_lookalike():
 
 def test_correlate_castles_excludes_a_castle_with_no_matching_host_run():
     host_run = HostRun(id="run-1", pid=1)
-    inspection = CastleInspection(name="parames-prod-9999-issue-3-xyz", vm_state="running")
+    inspection = CastleInspection(
+        name="parames-prod-9999-issue-3-xyz", vm_state="running"
+    )
 
     castles = correlate_castles([inspection], [host_run])
 

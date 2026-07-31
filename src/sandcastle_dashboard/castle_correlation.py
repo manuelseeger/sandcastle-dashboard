@@ -79,7 +79,9 @@ def correlate_castles(
                 name=inspection.name,
                 host_run_id=host_run_id,
                 scope=parsed.scope,
-                issue_number=_as_int(parsed.scope_id) if parsed.scope == "issue" else None,
+                issue_number=_as_int(parsed.scope_id)
+                if parsed.scope == "issue"
+                else None,
                 vm_state=inspection.vm_state,
                 uptime_seconds=inspection.uptime_seconds,
                 session_count=inspection.session_count,
@@ -88,7 +90,9 @@ def correlate_castles(
     return tuple(castles)
 
 
-def _match_host_run(parsed: ParsedCastleName, host_runs: Sequence[HostRun]) -> str | None:
+def _match_host_run(
+    parsed: ParsedCastleName, host_runs: Sequence[HostRun]
+) -> str | None:
     if parsed.invocation_or_pid is None:
         return None
     for run in host_runs:

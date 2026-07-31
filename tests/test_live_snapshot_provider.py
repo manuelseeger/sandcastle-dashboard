@@ -205,9 +205,7 @@ def test_get_snapshot_correlates_a_running_castle_to_its_host_run(tmp_path):
     repo_dir.mkdir()
     _write_uptime(proc_root)
     _write_orchestrator(proc_root, pid=42, cwd=repo_dir)
-    listing = json.dumps(
-        [{"name": "parames-prod-42-issue-9-abc", "status": "running"}]
-    )
+    listing = json.dumps([{"name": "parames-prod-42-issue-9-abc", "status": "running"}])
     inspection = json.dumps(
         {"state": "running", "uptime_seconds": 10.0, "active_sessions": 1}
     )

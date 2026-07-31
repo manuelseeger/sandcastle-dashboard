@@ -71,6 +71,7 @@ def _castles_for_host_run(
         return []
     return [castle for castle in castles if castle.host_run_id == host_run_id]
 
+
 CPU_UNKNOWN_LABEL = "measuring…"
 MEMORY_UNKNOWN_LABEL = "unknown"
 BAR_WIDTH = 20
