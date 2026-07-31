@@ -45,6 +45,16 @@ test("merge verification rejects unsafe issue IDs and invalid commit IDs", async
   await assert.rejects(prepareMergeSources(sandbox, [{ issueId: "2", commit: "not-a-commit" }]), /invalid merge source commit/);
 });
 
+test("merge orchestration awaits sandbox ancestry verification before cleanup", async () => {
+  const source = await readFile(".sandcastle/main.mts", "utf8");
+  const verification = source.indexOf("const verifiedSources = await mergedSources(sandbox, sources);");
+  const cleanup = source.indexOf("await sandbox.close();", verification);
+
+  assert.ok(verification >= 0, "merge verification must be awaited");
+  assert.ok(cleanup > verification, "sandbox cleanup must follow merge verification");
+  assert.match(source, /merger completed but did not verify any dependent source as merged/);
+});
+
 test("merge prompt instructs the agent to merge only orchestration-pinned source refs", async () => {
   const prompt = await readFile(".sandcastle/merge-prompt.md", "utf8");
 

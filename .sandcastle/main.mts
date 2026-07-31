@@ -428,7 +428,10 @@ async function mergeRoot(root: Root, completed: Array<{ issue: Issue; branch: st
       if (result.completionSignal !== COMPLETE || status.exitCode !== 0 || status.stdout.trim()) {
         throw new Error("merger did not complete with a clean root worktree");
       }
-      return mergedSources(sandbox, sources);
+      // Await while the sandbox is still alive. Returning this promise directly
+      // would enter finally and remove the microVM before git merge-base runs.
+      const verifiedSources = await mergedSources(sandbox, sources);
+      return verifiedSources;
     } finally {
       await sandbox.close();
     }
@@ -437,7 +440,10 @@ async function mergeRoot(root: Root, completed: Array<{ issue: Issue; branch: st
   // Agent output does not decide merge success. Sandbox-side ancestry is the
   // mechanical source of truth because Sandcastle replays its commits on host.
   const merged = completed.filter(({ issue }) => mergedIds.has(issue.id));
-  if (!merged.length) return [];
+  if (!merged.length) {
+    console.error(`  ✗ root #${root.id}: merger completed but did not verify any dependent source as merged`);
+    return [];
+  }
 
   // Publication is the transaction boundary for issue closure. If this normal
   // push fails, the function throws before any dependent issue is closed.
