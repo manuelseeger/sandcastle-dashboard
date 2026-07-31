@@ -14,6 +14,7 @@ from sandcastle_dashboard.repository import (
     resolve_repository,
     run_git_toplevel,
 )
+from sandcastle_dashboard.resource_usage import ResourceUsageSampler
 from sandcastle_dashboard.snapshot import HostRun, Snapshot
 
 
@@ -28,6 +29,7 @@ class LiveHostRunSnapshotProvider:
         self._proc_root = proc_root
         self._git_runner = git_runner
         self._tracker = HostRunTracker()
+        self._resource_sampler = ResourceUsageSampler()
 
     def get_snapshot(self) -> Snapshot:
         groups = discover_host_run_processes(self._proc_root)
@@ -36,11 +38,17 @@ class LiveHostRunSnapshotProvider:
 
     def _to_host_run(self, group: HostRunProcessGroup) -> HostRun:
         repository = resolve_repository(group.cwd, run=self._git_runner)
+        run_id = f"{group.pid}:{group.started_at}"
+        cpu_percent = self._resource_sampler.sample(
+            run_id, cpu_seconds=group.cpu_seconds, sampled_at=group.sampled_at
+        )
         return HostRun(
-            id=f"{group.pid}:{group.started_at}",
+            id=run_id,
             pid=group.pid,
             repository=repository,
             started_at=group.started_at,
             process_state=group.process_state,
             process_group_pids=tuple(sorted(group.member_pids)),
+            cpu_percent=cpu_percent,
+            memory_bytes=group.memory_bytes,
         )

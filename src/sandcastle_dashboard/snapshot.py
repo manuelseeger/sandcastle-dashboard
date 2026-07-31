@@ -38,6 +38,8 @@ class HostRun:
     process_state: str = "unknown"
     ended: bool = False
     process_group_pids: tuple[int, ...] = field(default_factory=tuple)
+    cpu_percent: float | None = None
+    memory_bytes: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

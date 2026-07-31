@@ -41,6 +41,20 @@ def test_host_run_defaults_to_no_repository_and_not_ended():
     assert host_run.process_group_pids == ()
 
 
+def test_host_run_defaults_to_unknown_cpu_and_memory():
+    host_run = HostRun(id="host-run-1", pid=123)
+
+    assert host_run.cpu_percent is None
+    assert host_run.memory_bytes is None
+
+
+def test_host_run_holds_the_cpu_and_memory_it_is_constructed_with():
+    host_run = HostRun(id="host-run-1", pid=123, cpu_percent=12.5, memory_bytes=2048)
+
+    assert host_run.cpu_percent == 12.5
+    assert host_run.memory_bytes == 2048
+
+
 def test_host_run_is_immutable():
     host_run = HostRun(id="host-run-1", pid=123)
 

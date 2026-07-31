@@ -10,9 +10,23 @@ from sandcastle_dashboard.discovery import discover_host_run_processes
 
 
 def _write_stat(
-    pid_dir: Path, pid: int, comm: str, ppid: int, state: str, starttime_ticks: int
+    pid_dir: Path,
+    pid: int,
+    comm: str,
+    ppid: int,
+    state: str,
+    starttime_ticks: int,
+    utime_ticks: int = 0,
+    stime_ticks: int = 0,
+    rss_pages: int = 0,
 ) -> None:
-    fields = [state, str(ppid)] + ["0"] * 17 + [str(starttime_ticks)]
+    fields = ["0"] * 22
+    fields[0] = state
+    fields[1] = str(ppid)
+    fields[11] = str(utime_ticks)
+    fields[12] = str(stime_ticks)
+    fields[19] = str(starttime_ticks)
+    fields[21] = str(rss_pages)
     (pid_dir / "stat").write_text(f"{pid} ({comm}) " + " ".join(fields))
 
 
@@ -33,10 +47,23 @@ def _write_process(
     state: str = "S",
     starttime_ticks: int = 100,
     cwd: Path | None = None,
+    utime_ticks: int = 0,
+    stime_ticks: int = 0,
+    rss_pages: int = 0,
 ) -> Path:
     pid_dir = proc_root / str(pid)
     pid_dir.mkdir()
-    _write_stat(pid_dir, pid, comm, ppid, state, starttime_ticks)
+    _write_stat(
+        pid_dir,
+        pid,
+        comm,
+        ppid,
+        state,
+        starttime_ticks,
+        utime_ticks=utime_ticks,
+        stime_ticks=stime_ticks,
+        rss_pages=rss_pages,
+    )
     _write_cmdline(pid_dir, argv)
     if cwd is not None:
         (pid_dir / "cwd").symlink_to(cwd)
@@ -213,3 +240,85 @@ def test_discover_host_run_processes_returns_empty_when_proc_root_is_unreadable(
     groups = discover_host_run_processes(missing_root)
 
     assert groups == []
+
+
+def test_discover_host_run_processes_aggregates_cpu_seconds_across_the_tree(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "sandcastle_dashboard.discovery._clock_ticks_per_second", lambda: 100.0
+    )
+    _write_uptime(tmp_path)
+    _write_process(
+        tmp_path,
+        pid=90,
+        ppid=1,
+        argv=["node", ".sandcastle/main.mts"],
+        utime_ticks=50,
+        stime_ticks=30,
+    )
+    _write_process(
+        tmp_path,
+        pid=91,
+        ppid=90,
+        argv=["sbx", "exec", "claude"],
+        utime_ticks=20,
+        stime_ticks=10,
+    )
+
+    groups = discover_host_run_processes(tmp_path)
+
+    assert len(groups) == 1
+    # (50 + 30 + 20 + 10) ticks / 100 ticks-per-second
+    assert groups[0].cpu_seconds == pytest.approx(1.1)
+
+
+def test_discover_host_run_processes_aggregates_resident_memory_across_the_tree(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr("sandcastle_dashboard.discovery._page_size", lambda: 4096)
+    _write_uptime(tmp_path)
+    _write_process(
+        tmp_path, pid=92, ppid=1, argv=["node", ".sandcastle/main.mts"], rss_pages=100
+    )
+    _write_process(
+        tmp_path, pid=93, ppid=92, argv=["sbx", "exec", "claude"], rss_pages=50
+    )
+
+    groups = discover_host_run_processes(tmp_path)
+
+    assert len(groups) == 1
+    assert groups[0].memory_bytes == 150 * 4096
+
+
+def test_discover_host_run_processes_sets_a_monotonic_sampled_at_timestamp(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr("sandcastle_dashboard.discovery.time.monotonic", lambda: 42.0)
+    _write_uptime(tmp_path)
+    _write_process(tmp_path, pid=94, ppid=1, argv=["node", ".sandcastle/main.mts"])
+
+    groups = discover_host_run_processes(tmp_path)
+
+    assert groups[0].sampled_at == 42.0
+
+
+def test_discover_host_run_processes_defaults_cpu_and_memory_when_stat_omits_them(
+    tmp_path,
+):
+    """A stat line shorter than the optional cpu/rss fields must not crash
+    discovery: those fields default to zero rather than the process itself
+    being dropped."""
+    _write_uptime(tmp_path)
+    pid_dir = tmp_path / "97"
+    pid_dir.mkdir()
+    # Only state, ppid, and starttime are present; utime/stime/rss are absent.
+    fields = ["S", "1"] + ["0"] * 17 + ["100"]
+    (pid_dir / "stat").write_text("97 (node) " + " ".join(fields))
+    (pid_dir / "cmdline").write_bytes(b"node\x00.sandcastle/main.mts\x00")
+
+    groups = discover_host_run_processes(tmp_path)
+
+    assert len(groups) == 1
+    assert groups[0].cpu_seconds == 0.0
+    assert groups[0].memory_bytes == 0

@@ -20,7 +20,10 @@ SECRET = "super-secret-token-do-not-leak"
 
 
 def _write_stat(pid_dir: Path, pid: int, ppid: int, state: str = "S") -> None:
-    fields = [state, str(ppid)] + ["0"] * 17 + ["100"]
+    fields = ["0"] * 22
+    fields[0] = state
+    fields[1] = str(ppid)
+    fields[19] = "100"
     (pid_dir / "stat").write_text(f"{pid} (node) " + " ".join(fields))
 
 

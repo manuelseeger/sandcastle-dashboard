@@ -185,6 +185,60 @@ async def test_pressing_r_requests_an_immediate_refresh():
         assert provider.call_count > calls_before_refresh
 
 
+async def test_dashboard_app_shows_pid_state_start_time_and_elapsed_time():
+    run = HostRun(id="run-1", pid=42, started_at=1_000.0, process_state="sleeping")
+    provider = StaticSnapshotProvider(Snapshot(host_runs=(run,)))
+    app = DashboardApp(
+        snapshot_provider=provider, poll_interval=100, clock=lambda: 1_125.0
+    )
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        content = app.query_one("#status", Static).content
+        assert "pid 42" in content
+        assert "State: sleeping" in content
+        assert "Elapsed: 2m05s" in content
+
+
+async def test_dashboard_app_shows_cpu_and_memory_bars_from_the_snapshot():
+    run = HostRun(
+        id="run-1",
+        pid=42,
+        started_at=1_000.0,
+        cpu_percent=50.0,
+        memory_bytes=512 * 1024 * 1024,
+    )
+    provider = StaticSnapshotProvider(Snapshot(host_runs=(run,)))
+    app = DashboardApp(
+        snapshot_provider=provider,
+        poll_interval=100,
+        cpu_count=1,
+        total_memory_bytes=1024 * 1024 * 1024,
+    )
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        content = app.query_one("#status", Static).content
+        assert "CPU  [██████████░░░░░░░░░░] 50.0%" in content
+        assert "MEM  [██████████░░░░░░░░░░] 512.0MiB" in content
+
+
+async def test_dashboard_app_shows_unavailable_metrics_without_crashing():
+    run = HostRun(id="run-1", pid=42, started_at=1_000.0)
+    provider = StaticSnapshotProvider(Snapshot(host_runs=(run,)))
+    app = DashboardApp(snapshot_provider=provider, poll_interval=100)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        content = app.query_one("#status", Static).content
+        assert "measuring" in content
+        assert "unknown" in content
+        assert "░" * 20 in content
+
+
 async def test_pressing_q_exits_the_application():
     provider = StaticSnapshotProvider(Snapshot())
     app = DashboardApp(snapshot_provider=provider, poll_interval=100)

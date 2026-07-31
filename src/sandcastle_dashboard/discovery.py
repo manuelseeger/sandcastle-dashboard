@@ -46,6 +46,8 @@ class ProcessRecord:
     process_state: str
     starttime_ticks: int
     cwd: Path | None
+    cpu_ticks: int
+    memory_bytes: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +59,9 @@ class HostRunProcessGroup:
     cwd: Path | None
     started_at: float | None
     process_state: str
+    cpu_seconds: float
+    memory_bytes: int
+    sampled_at: float
 
 
 def discover_host_run_processes(
@@ -70,6 +75,7 @@ def discover_host_run_processes(
     processes = _read_all_processes(proc_root)
     boot_epoch = _boot_epoch(proc_root)
     clock_ticks_per_second = _clock_ticks_per_second()
+    sampled_at = time.monotonic()
 
     children_by_ppid: dict[int, list[int]] = defaultdict(list)
     for record in processes.values():
@@ -87,6 +93,8 @@ def discover_host_run_processes(
             if boot_epoch is not None
             else None
         )
+        cpu_ticks_total = sum(processes[pid].cpu_ticks for pid in members)
+        memory_bytes_total = sum(processes[pid].memory_bytes for pid in members)
         groups.append(
             HostRunProcessGroup(
                 pid=record.pid,
@@ -94,6 +102,9 @@ def discover_host_run_processes(
                 cwd=record.cwd,
                 started_at=started_at,
                 process_state=record.process_state,
+                cpu_seconds=cpu_ticks_total / clock_ticks_per_second,
+                memory_bytes=memory_bytes_total,
+                sampled_at=sampled_at,
             )
         )
     return groups
@@ -153,7 +164,7 @@ def _read_process(pid_dir: Path) -> ProcessRecord | None:
     parsed = _parse_stat(stat_text)
     if parsed is None:
         return None
-    ppid, state_code, starttime_ticks = parsed
+    ppid, state_code, starttime_ticks, utime_ticks, stime_ticks, rss_pages = parsed
     argv = _read_cmdline(pid_dir)
     role = _classify(argv)
     cwd = _read_cwd(pid_dir)
@@ -164,10 +175,12 @@ def _read_process(pid_dir: Path) -> ProcessRecord | None:
         process_state=_PROCESS_STATE_LABELS.get(state_code, "unknown"),
         starttime_ticks=starttime_ticks,
         cwd=cwd,
+        cpu_ticks=utime_ticks + stime_ticks,
+        memory_bytes=rss_pages * _page_size(),
     )
 
 
-def _parse_stat(text: str) -> tuple[int, str, int] | None:
+def _parse_stat(text: str) -> tuple[int, str, int, int, int, int] | None:
     try:
         last_paren = text.rindex(")")
     except ValueError:
@@ -177,9 +190,19 @@ def _parse_stat(text: str) -> tuple[int, str, int] | None:
         state = rest[0]
         ppid = int(rest[1])
         starttime_ticks = int(rest[19])
-    except (IndexError, ValueError):
+    except IndexError, ValueError:
         return None
-    return ppid, state, starttime_ticks
+    utime_ticks = _int_field(rest, 11)
+    stime_ticks = _int_field(rest, 12)
+    rss_pages = _int_field(rest, 21)
+    return ppid, state, starttime_ticks, utime_ticks, stime_ticks, rss_pages
+
+
+def _int_field(fields: list[str], index: int) -> int:
+    try:
+        return int(fields[index])
+    except IndexError, ValueError:
+        return 0
 
 
 def _read_cmdline(pid_dir: Path) -> list[str]:
@@ -221,7 +244,7 @@ def _classify(argv: list[str]) -> str:
 def _boot_epoch(proc_root: Path) -> float | None:
     try:
         uptime_seconds = float((proc_root / "uptime").read_text().split()[0])
-    except (OSError, ValueError, IndexError):
+    except OSError, ValueError, IndexError:
         return None
     return time.time() - uptime_seconds
 
@@ -229,5 +252,12 @@ def _boot_epoch(proc_root: Path) -> float | None:
 def _clock_ticks_per_second() -> float:
     try:
         return float(os.sysconf("SC_CLK_TCK"))
-    except (AttributeError, ValueError, OSError):
+    except AttributeError, ValueError, OSError:
         return 100.0
+
+
+def _page_size() -> int:
+    try:
+        return int(os.sysconf("SC_PAGESIZE"))
+    except AttributeError, ValueError, OSError:
+        return 4096
