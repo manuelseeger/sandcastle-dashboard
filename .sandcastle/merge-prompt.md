@@ -1,10 +1,10 @@
 # TASK
 
-Merge these dependent branches into root branch `{{ROOT_BRANCH}}`:
+Merge these dependent source refs into root branch `{{ROOT_BRANCH}}`:
 
 {{BRANCHES}}
 
-The sandbox is already on the root branch. Only integrate the listed branches; do not push branches, create or edit PRs, post comments, or close issues. Orchestration handles GitHub lifecycle actions.
+The sandbox is already on the root branch. The listed refs pin the exact dependent commits selected by orchestration. Only integrate those refs; do not push branches, create or edit PRs, post comments, or close issues. Orchestration handles GitHub lifecycle actions.
 
 # ISSUE CONTEXT
 
@@ -18,7 +18,7 @@ The following deterministic GitHub context contains the open issue set. Focus on
 
 # MERGE PROCESS
 
-For each branch, run `git merge <branch> --no-edit`. Resolve conflicts using issue and repository context and run validation appropriate to the integrated work. If an individual merge cannot be completed safely, abort that merge so the root is clean, then continue with other branches when safe.
+For each source ref, run `git merge <source-ref> --no-edit`. Resolve conflicts using issue and repository context and run validation appropriate to the integrated work. If an individual merge cannot be completed safely, abort that merge so the root is clean, then continue with other source refs when safe.
 
 Use normal Git merge behavior. Do not squash, force `--no-ff`, or create a synthetic summary commit. Before completion, ensure the root worktree is clean and all successful integration work is committed. Partial success is valid.
 
