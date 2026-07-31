@@ -193,10 +193,11 @@ function isAncestor(ancestor: string, descendant: string): boolean {
   }
 }
 
-// Publish only the named branch to the same remote branch. No force option is
-// ever used: remote rejection safely stops closure/finalization for that root.
+// Publish only the named branch to the same remote branch and record that
+// same-named remote as its upstream. No force option is ever used: remote
+// rejection safely stops closure/finalization for that root.
 function push(branch: string): void {
-  git(["push", "origin", `refs/heads/${branch}:refs/heads/${branch}`]);
+  git(["push", "--set-upstream", "origin", `refs/heads/${branch}:refs/heads/${branch}`]);
 }
 
 // ---------------------------------------------------------------------------
@@ -271,11 +272,13 @@ function ensureRoot(rootId: string, rootTitle: string, baseBranch: string): Root
       return undefined;
     }
   } else if (hasRemote) {
-    // A published root without a local branch is resumed from the remote tip.
-    git(["branch", branch, `origin/${branch}`]);
+    // A published root without a local branch is resumed from its own remote
+    // branch, which must become the local branch's upstream.
+    git(["branch", "--track", branch, `origin/${branch}`]);
   } else if (!hasLocal) {
-    // A genuinely new root starts from the freshly fetched configured base.
-    git(["branch", branch, `origin/${baseBranch}`]);
+    // A genuinely new root starts from the fetched base but must not inherit
+    // that base branch (usually origin/main) as its upstream.
+    git(["branch", "--no-track", branch, `origin/${baseBranch}`]);
   }
 
   // Look up the PR before initializing so retries never add another empty
@@ -324,7 +327,9 @@ function ensureRoot(rootId: string, rootTitle: string, baseBranch: string): Root
 // retry does not merge newer root work into partially completed issue work.
 function ensureDependentBranch(issue: Issue, root: Root): string {
   const branch = branchFor(issue.id);
-  if (!branchExists(`refs/heads/${branch}`)) git(["branch", branch, root.branch]);
+  // Dependents are private work branches and must not inherit the root's
+  // upstream configuration, regardless of the operator's Git defaults.
+  if (!branchExists(`refs/heads/${branch}`)) git(["branch", "--no-track", branch, root.branch]);
   return branch;
 }
 
