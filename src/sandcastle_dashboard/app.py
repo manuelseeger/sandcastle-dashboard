@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import math
+import re
 import time
 from collections.abc import Callable, Sequence
 from typing import ClassVar
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Container
+from textual.containers import Container, Grid
 from textual.reactive import reactive
 from textual.widgets import Footer, Header, Static
 
@@ -20,11 +22,54 @@ from sandcastle_dashboard.formatting import (
     format_duration,
     format_timestamp,
 )
-from sandcastle_dashboard.snapshot import HostRun, Snapshot, SnapshotProvider
+from sandcastle_dashboard.snapshot import Castle, HostRun, Snapshot, SnapshotProvider
 
 WAITING_MESSAGE = (
     "No Host Run detected.\nWaiting for a Sandcastle orchestration run to start..."
 )
+NO_CASTLES_MESSAGE = "No running Castles for this Host Run."
+
+_SLUG_PATTERN = re.compile(r"[^a-zA-Z0-9_-]+")
+
+
+def _slug(text: str) -> str:
+    return _SLUG_PATTERN.sub("-", text).strip("-") or "castle"
+
+
+def _format_uptime(uptime_seconds: float | None) -> str:
+    if uptime_seconds is None:
+        return "uptime unknown"
+    total_seconds = int(uptime_seconds)
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"uptime {hours}h{minutes}m"
+    if minutes:
+        return f"uptime {minutes}m{seconds}s"
+    return f"uptime {seconds}s"
+
+
+def _format_scope(castle: Castle) -> str:
+    if castle.scope == "issue" and castle.issue_number is not None:
+        return f"issue #{castle.issue_number}"
+    return castle.scope
+
+
+def _castle_pane_text(castle: Castle) -> str:
+    sessions = "unknown" if castle.session_count is None else str(castle.session_count)
+    return (
+        f"{castle.name}\n"
+        f"{_format_scope(castle)} • {castle.vm_state}\n"
+        f"{_format_uptime(castle.uptime_seconds)} • {sessions} session(s)"
+    )
+
+
+def _castles_for_host_run(
+    castles: Sequence[Castle], host_run_id: str | None
+) -> list[Castle]:
+    if host_run_id is None:
+        return []
+    return [castle for castle in castles if castle.host_run_id == host_run_id]
 
 CPU_UNKNOWN_LABEL = "measuring…"
 MEMORY_UNKNOWN_LABEL = "unknown"
@@ -52,14 +97,28 @@ class DashboardApp(App[None]):
     """Polls an injected ``SnapshotProvider`` and renders dashboard state.
 
     Selects the newest live Host Run initially and lets the operator switch
-    with ``[``/``]``. A later issue adds the Castle grid on top of this
-    shell.
+    with ``[``/``]``. Every running Castle correlated to the selected Host
+    Run is shown in an adaptive equal-sized grid below the summary line.
     """
 
     CSS = """
     #content {
-        align: center middle;
         height: 1fr;
+    }
+    #status {
+        height: auto;
+    }
+    #castle-status {
+        height: auto;
+        color: $warning;
+    }
+    #castle-grid {
+        height: 1fr;
+    }
+    .castle-pane {
+        border: round $primary;
+        height: 1fr;
+        padding: 0 1;
     }
     """
 
@@ -99,6 +158,8 @@ class DashboardApp(App[None]):
         yield Header()
         with Container(id="content"):
             yield Static(WAITING_MESSAGE, id="status", markup=False)
+            yield Static("", id="castle-status")
+            yield Grid(id="castle-grid")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -149,9 +210,12 @@ class DashboardApp(App[None]):
 
     def _render_status(self) -> None:
         status = self.query_one("#status", Static)
+        castle_status = self.query_one("#castle-status", Static)
         ordered = _ordered_host_runs(self.snapshot.host_runs)
         if not ordered:
             status.update(WAITING_MESSAGE)
+            castle_status.update("")
+            self._render_castle_grid([])
             return
         ids = [run.id for run in ordered]
         try:
@@ -163,12 +227,17 @@ class DashboardApp(App[None]):
         repo_name = (
             selected.repository.name if selected.repository else "unknown repository"
         )
+        castles = _castles_for_host_run(self.snapshot.castles, selected.id)
+        castle_count = len(castles)
+        castle_noun = "castle" if castle_count == 1 else "castles"
         status.update(
             f"Host Run {index + 1}/{len(ordered)} — pid {selected.pid} "
-            f"• {repo_name} • {outcome}\n"
+            f"• {repo_name} • {outcome} • {castle_count} running {castle_noun}\n"
             f"{self._render_operational_summary(selected)}\n"
             f"{self._render_resource_bars(selected)}"
         )
+        castle_status.update(self.snapshot.castle_discovery_error or "")
+        self._render_castle_grid(castles)
 
     def _render_operational_summary(self, host_run: HostRun) -> str:
         started_label = (
@@ -212,4 +281,27 @@ class DashboardApp(App[None]):
         return (
             f"CPU  [{render_bar(cpu_fraction, width=BAR_WIDTH)}] {cpu_label}\n"
             f"MEM  [{render_bar(memory_fraction, width=BAR_WIDTH)}] {memory_label}"
+        )
+
+    def _render_castle_grid(self, castles: Sequence[Castle]) -> None:
+        grid = self.query_one("#castle-grid", Grid)
+        grid.remove_children()
+        if not castles:
+            grid.styles.grid_size_columns = 1
+            grid.styles.grid_size_rows = 1
+            castle_status = self.query_one("#castle-status", Static)
+            if not castle_status.content:
+                castle_status.update(NO_CASTLES_MESSAGE)
+            return
+        columns = math.ceil(math.sqrt(len(castles)))
+        rows = math.ceil(len(castles) / columns)
+        grid.styles.grid_size_columns = columns
+        grid.styles.grid_size_rows = rows
+        grid.mount_all(
+            Static(
+                _castle_pane_text(castle),
+                classes="castle-pane",
+                id=f"castle-{_slug(castle.name)}",
+            )
+            for castle in castles
         )

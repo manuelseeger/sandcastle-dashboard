@@ -40,6 +40,21 @@ class HostRun:
     process_group_pids: tuple[int, ...] = field(default_factory=tuple)
     cpu_percent: float | None = None
     memory_bytes: int | None = None
+    invocation_id: str | None = None
+    deployment_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Castle:
+    """A running Docker Sandbox Castle correlated to a Host Run."""
+
+    name: str
+    host_run_id: str
+    scope: str
+    vm_state: str
+    issue_number: int | None = None
+    uptime_seconds: float | None = None
+    session_count: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +62,8 @@ class Snapshot:
     """A point-in-time view of all Host Runs known to the dashboard."""
 
     host_runs: Sequence[HostRun] = field(default_factory=tuple)
+    castles: Sequence[Castle] = field(default_factory=tuple)
+    castle_discovery_error: str | None = None
 
 
 class SnapshotProvider(Protocol):

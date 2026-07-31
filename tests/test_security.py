@@ -93,7 +93,11 @@ def test_snapshot_pipeline_excludes_secret_cmdline_and_environment_values(tmp_pa
     assert SECRET not in str(snapshot)
 
 
-def test_discovery_never_reads_a_process_environ_file(tmp_path, monkeypatch):
+def test_discovery_never_retains_unallowlisted_environment_values(tmp_path):
+    """Discovery may read the orchestrator's environ to extract explicit
+    Sandcastle correlation identifiers, but only the two allowlisted keys —
+    every other environment value, such as an injected secret, must never
+    surface on the resulting process group."""
     proc_root = tmp_path / "proc"
     proc_root.mkdir()
     repo_dir = tmp_path / "repo"
@@ -101,10 +105,34 @@ def test_discovery_never_reads_a_process_environ_file(tmp_path, monkeypatch):
     _write_uptime(proc_root)
     _write_orchestrator_with_secret_cmdline(proc_root, pid=42, cwd=repo_dir)
 
+    groups = discover_host_run_processes(proc_root)
+
+    assert len(groups) == 1
+    assert SECRET not in repr(groups[0])
+    assert SECRET not in str(groups[0])
+    assert groups[0].invocation_id is None
+    assert groups[0].deployment_id is None
+
+
+def test_discovery_never_reads_environ_for_non_orchestrator_processes(
+    tmp_path, monkeypatch
+):
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    _write_uptime(proc_root)
+    _write_orchestrator_with_secret_cmdline(proc_root, pid=42, cwd=repo_dir)
+    wrapper_dir = proc_root / "41"
+    wrapper_dir.mkdir()
+    _write_stat(wrapper_dir, pid=41, ppid=1)
+    (wrapper_dir / "cmdline").write_bytes(b"npm\x00run\x00sandcastle\x00")
+    (wrapper_dir / "environ").write_bytes(f"SANDCASTLE_SECRET={SECRET}\x00".encode())
+
     real_read_bytes = Path.read_bytes
 
     def _guarded_read_bytes(self, *args, **kwargs):
-        if self.name == "environ":
+        if self.name == "environ" and self.parent.name != "42":
             pytest.fail(f"discovery must never read {self}")
         return real_read_bytes(self, *args, **kwargs)
 

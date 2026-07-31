@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -120,6 +121,21 @@ def test_get_snapshot_returns_empty_snapshot_when_no_orchestrator_is_discovered(
     assert snapshot.host_runs == ()
 
 
+def _fake_sbx_runner(listing_json: str, inspections_by_name: dict[str, str]):
+    def run(args):
+        args = tuple(args)
+        if args == ("ls", "--json"):
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=listing_json, stderr=""
+            )
+        name = args[1]
+        return subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=inspections_by_name[name], stderr=""
+        )
+
+    return run
+
+
 def test_get_snapshot_reports_aggregated_memory_on_the_first_poll(tmp_path):
     proc_root = tmp_path / "proc"
     proc_root.mkdir()
@@ -180,3 +196,60 @@ def test_get_snapshot_computes_cpu_percent_from_the_second_poll_onward(
 
     # (300 - 100) ticks / 100 ticks-per-second = 2 cpu-seconds over 2 wall seconds
     assert snapshot.host_runs[0].cpu_percent == 100.0
+
+
+def test_get_snapshot_correlates_a_running_castle_to_its_host_run(tmp_path):
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    _write_uptime(proc_root)
+    _write_orchestrator(proc_root, pid=42, cwd=repo_dir)
+    listing = json.dumps(
+        [{"name": "parames-prod-42-issue-9-abc", "status": "running"}]
+    )
+    inspection = json.dumps(
+        {"state": "running", "uptime_seconds": 10.0, "active_sessions": 1}
+    )
+    provider = LiveHostRunSnapshotProvider(
+        proc_root=proc_root,
+        git_runner=_fake_git_runner(repo_dir),
+        sbx_runner=_fake_sbx_runner(
+            listing, {"parames-prod-42-issue-9-abc": inspection}
+        ),
+    )
+
+    snapshot = provider.get_snapshot()
+
+    assert snapshot.castle_discovery_error is None
+    assert len(snapshot.castles) == 1
+    castle = snapshot.castles[0]
+    assert castle.host_run_id == snapshot.host_runs[0].id
+    assert castle.scope == "issue"
+    assert castle.issue_number == 9
+
+
+def test_get_snapshot_reports_readable_castle_discovery_error_without_discarding_host_runs(
+    tmp_path,
+):
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    _write_uptime(proc_root)
+    _write_orchestrator(proc_root, pid=42, cwd=repo_dir)
+
+    def broken_sbx_runner(args):
+        raise FileNotFoundError("sbx not found")
+
+    provider = LiveHostRunSnapshotProvider(
+        proc_root=proc_root,
+        git_runner=_fake_git_runner(repo_dir),
+        sbx_runner=broken_sbx_runner,
+    )
+
+    snapshot = provider.get_snapshot()
+
+    assert snapshot.castles == ()
+    assert snapshot.castle_discovery_error is not None
+    assert len(snapshot.host_runs) == 1

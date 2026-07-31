@@ -22,6 +22,13 @@ from pathlib import Path
 ORCHESTRATOR_SCRIPT_SUFFIXES = (".sandcastle/main.mts",)
 WRAPPER_EXECUTABLE_NAMES = frozenset({"npm", "tsx"})
 
+# The only environment keys discovery ever reads, and only for the
+# orchestrator process. These carry explicit Sandcastle correlation
+# identifiers; no other environment key or full command line is retained.
+INVOCATION_ID_ENV_KEY = "SANDCASTLE_INVOCATION_ID"
+DEPLOYMENT_ID_ENV_KEY = "SANDCASTLE_DEPLOYMENT_ID"
+_ALLOWLISTED_ENV_KEYS = frozenset({INVOCATION_ID_ENV_KEY, DEPLOYMENT_ID_ENV_KEY})
+
 _PROCESS_STATE_LABELS = {
     "R": "running",
     "S": "sleeping",
@@ -48,6 +55,8 @@ class ProcessRecord:
     cwd: Path | None
     cpu_ticks: int
     memory_bytes: int
+    invocation_id: str | None = None
+    deployment_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +71,8 @@ class HostRunProcessGroup:
     cpu_seconds: float
     memory_bytes: int
     sampled_at: float
+    invocation_id: str | None = None
+    deployment_id: str | None = None
 
 
 def discover_host_run_processes(
@@ -105,6 +116,8 @@ def discover_host_run_processes(
                 cpu_seconds=cpu_ticks_total / clock_ticks_per_second,
                 memory_bytes=memory_bytes_total,
                 sampled_at=sampled_at,
+                invocation_id=record.invocation_id,
+                deployment_id=record.deployment_id,
             )
         )
     return groups
@@ -168,6 +181,12 @@ def _read_process(pid_dir: Path) -> ProcessRecord | None:
     argv = _read_cmdline(pid_dir)
     role = _classify(argv)
     cwd = _read_cwd(pid_dir)
+    invocation_id = None
+    deployment_id = None
+    if role == "orchestrator":
+        allowlisted_env = _read_allowlisted_env(pid_dir)
+        invocation_id = allowlisted_env.get(INVOCATION_ID_ENV_KEY)
+        deployment_id = allowlisted_env.get(DEPLOYMENT_ID_ENV_KEY)
     return ProcessRecord(
         pid=pid,
         ppid=ppid,
@@ -177,6 +196,8 @@ def _read_process(pid_dir: Path) -> ProcessRecord | None:
         cwd=cwd,
         cpu_ticks=utime_ticks + stime_ticks,
         memory_bytes=rss_pages * _page_size(),
+        invocation_id=invocation_id,
+        deployment_id=deployment_id,
     )
 
 
@@ -213,6 +234,28 @@ def _read_cmdline(pid_dir: Path) -> list[str]:
     return [
         part.decode("utf-8", errors="replace") for part in raw.split(b"\x00") if part
     ]
+
+
+def _read_allowlisted_env(pid_dir: Path) -> dict[str, str]:
+    """Read only ``_ALLOWLISTED_ENV_KEYS`` from a process's environment.
+
+    The full environment is never parsed into a dict or retained: each entry
+    is checked against the allowlist as it is read, and everything else is
+    discarded immediately.
+    """
+    try:
+        raw = (pid_dir / "environ").read_bytes()
+    except OSError:
+        return {}
+    found: dict[str, str] = {}
+    for entry in raw.split(b"\x00"):
+        if not entry or b"=" not in entry:
+            continue
+        key, _, value = entry.partition(b"=")
+        key_text = key.decode("utf-8", errors="replace")
+        if key_text in _ALLOWLISTED_ENV_KEYS:
+            found[key_text] = value.decode("utf-8", errors="replace")
+    return found
 
 
 def _read_cwd(pid_dir: Path) -> Path | None:

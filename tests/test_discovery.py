@@ -50,6 +50,7 @@ def _write_process(
     utime_ticks: int = 0,
     stime_ticks: int = 0,
     rss_pages: int = 0,
+    environ: dict[str, str] | None = None,
 ) -> Path:
     pid_dir = proc_root / str(pid)
     pid_dir.mkdir()
@@ -67,6 +68,9 @@ def _write_process(
     _write_cmdline(pid_dir, argv)
     if cwd is not None:
         (pid_dir / "cwd").symlink_to(cwd)
+    if environ is not None:
+        payload = b"\x00".join(f"{k}={v}".encode() for k, v in environ.items())
+        (pid_dir / "environ").write_bytes(payload + b"\x00")
     return pid_dir
 
 
@@ -230,6 +234,40 @@ def test_discover_host_run_processes_ignores_non_numeric_proc_entries(tmp_path):
 
     assert len(groups) == 1
     assert groups[0].pid == 80
+
+
+def test_discover_host_run_processes_reads_explicit_invocation_and_deployment_ids(
+    tmp_path,
+):
+    _write_uptime(tmp_path)
+    _write_process(
+        tmp_path,
+        pid=90,
+        ppid=1,
+        argv=["node", ".sandcastle/main.mts"],
+        environ={
+            "SANDCASTLE_INVOCATION_ID": "inv-123",
+            "SANDCASTLE_DEPLOYMENT_ID": "deploy-1",
+            "PATH": "/usr/bin",
+        },
+    )
+
+    groups = discover_host_run_processes(tmp_path)
+
+    assert len(groups) == 1
+    assert groups[0].invocation_id == "inv-123"
+    assert groups[0].deployment_id == "deploy-1"
+
+
+def test_discover_host_run_processes_leaves_ids_unset_without_explicit_env(tmp_path):
+    _write_uptime(tmp_path)
+    _write_process(tmp_path, pid=91, ppid=1, argv=["node", ".sandcastle/main.mts"])
+
+    groups = discover_host_run_processes(tmp_path)
+
+    assert len(groups) == 1
+    assert groups[0].invocation_id is None
+    assert groups[0].deployment_id is None
 
 
 def test_discover_host_run_processes_returns_empty_when_proc_root_is_unreadable(

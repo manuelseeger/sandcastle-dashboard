@@ -8,7 +8,7 @@ import time
 from textual.widgets import Static
 
 from sandcastle_dashboard.app import WAITING_MESSAGE, DashboardApp
-from sandcastle_dashboard.snapshot import HostRun, Snapshot
+from sandcastle_dashboard.snapshot import Castle, HostRun, Snapshot
 
 
 class StaticSnapshotProvider:
@@ -249,3 +249,105 @@ async def test_pressing_q_exits_the_application():
         await pilot.pause()
 
     assert app.return_code == 0
+
+
+def _castle_pane_texts(app: DashboardApp) -> list[str]:
+    return [str(pane.render()) for pane in app.query(".castle-pane")]
+
+
+async def test_dashboard_app_shows_every_running_castle_for_the_selected_host_run():
+    run = HostRun(id="run-1", pid=42, started_at=10.0)
+    castles = (
+        Castle(
+            name="parames-prod-42-issue-9-abc",
+            host_run_id="run-1",
+            scope="issue",
+            issue_number=9,
+            vm_state="running",
+            uptime_seconds=125.0,
+            session_count=1,
+        ),
+        Castle(
+            name="parames-prod-42-merge-3-def",
+            host_run_id="run-1",
+            scope="merger",
+            vm_state="stopped",
+            uptime_seconds=None,
+            session_count=0,
+        ),
+    )
+    provider = StaticSnapshotProvider(Snapshot(host_runs=(run,), castles=castles))
+    app = DashboardApp(snapshot_provider=provider, poll_interval=100)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        panes = app.query(".castle-pane")
+        assert len(panes) == 2
+        texts = _castle_pane_texts(app)
+        assert any("issue" in text and "9" in text and "running" in text for text in texts)
+        assert any("merger" in text and "stopped" in text for text in texts)
+
+
+async def test_dashboard_app_shows_running_castle_count_in_host_run_summary():
+    run = HostRun(id="run-1", pid=42, started_at=10.0)
+    castles = (
+        Castle(name="c1", host_run_id="run-1", scope="issue", vm_state="running"),
+        Castle(name="c2", host_run_id="run-1", scope="planner", vm_state="running"),
+    )
+    provider = StaticSnapshotProvider(Snapshot(host_runs=(run,), castles=castles))
+    app = DashboardApp(snapshot_provider=provider, poll_interval=100)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert "2" in app.query_one("#status", Static).content
+
+
+async def test_dashboard_app_only_shows_castles_belonging_to_the_selected_host_run():
+    selected = HostRun(id="run-selected", pid=1, started_at=20.0)
+    other = HostRun(id="run-other", pid=2, started_at=10.0)
+    castles = (
+        Castle(name="c1", host_run_id="run-selected", scope="issue", vm_state="running"),
+        Castle(name="c2", host_run_id="run-other", scope="planner", vm_state="running"),
+    )
+    provider = StaticSnapshotProvider(
+        Snapshot(host_runs=(selected, other), castles=castles)
+    )
+    app = DashboardApp(snapshot_provider=provider, poll_interval=100)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert app.selected_host_run_id == "run-selected"
+        panes = app.query(".castle-pane")
+        assert len(panes) == 1
+
+
+async def test_dashboard_app_shows_a_message_when_the_selected_host_run_has_no_castles():
+    run = HostRun(id="run-1", pid=42, started_at=10.0)
+    provider = StaticSnapshotProvider(Snapshot(host_runs=(run,)))
+    app = DashboardApp(snapshot_provider=provider, poll_interval=100)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert len(app.query(".castle-pane")) == 0
+        assert "no running castles" in app.query_one("#castle-status", Static).content.lower()
+
+
+async def test_dashboard_app_shows_readable_status_when_castle_discovery_fails():
+    run = HostRun(id="run-1", pid=42, started_at=10.0)
+    provider = StaticSnapshotProvider(
+        Snapshot(
+            host_runs=(run,),
+            castle_discovery_error="sbx is not installed or not on PATH",
+        )
+    )
+    app = DashboardApp(snapshot_provider=provider, poll_interval=100)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        status = app.query_one("#castle-status", Static).content
+        assert "sbx is not installed" in status
