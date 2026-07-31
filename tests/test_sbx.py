@@ -54,6 +54,29 @@ def test_discover_running_castles_returns_inspected_running_castles():
     assert castle.session_count == 1
 
 
+def test_discover_running_castles_listing_wraps_sandboxes_inspects_running_castles():
+    listing = json.dumps(
+        {
+            "sandboxes": [
+                {"name": "castle-a", "status": "running"},
+                {"name": "castle-b", "status": "stopped"},
+            ]
+        }
+    )
+    inspection = json.dumps({"state": "running"})
+    run = _runner(
+        {
+            ("ls", "--json"): _completed(stdout=listing),
+            ("inspect", "castle-a", "--json"): _completed(stdout=inspection),
+        }
+    )
+
+    result = discover_running_castles(run)
+
+    assert result.error is None
+    assert [castle.name for castle in result.castles] == ["castle-a"]
+
+
 def test_discover_running_castles_excludes_stopped_castles_from_inspection():
     listing = json.dumps([{"name": "castle-b", "status": "stopped"}])
     run = _runner({("ls", "--json"): _completed(stdout=listing)})

@@ -85,6 +85,8 @@ def _list_running_castle_names(run: SbxRunner) -> tuple[list[str], str | None]:
     payload, error = _run_json_command(["ls", "--json"], run)
     if error is not None:
         return [], error
+    if isinstance(payload, dict):
+        payload = payload.get("sandboxes")
     if not isinstance(payload, list):
         return [], "sbx ls --json returned an unexpected shape"
     names = []
