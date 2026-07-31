@@ -505,7 +505,7 @@ class DashboardApp(App[None]):
                 classes="castle-header",
                 markup=False,
             ),
-            CastleLog(classes="castle-log", markup=False, highlight=False, wrap=False),
+            CastleLog(classes="castle-log", markup=False, highlight=False, wrap=True),
             classes="castle-pane",
             id=f"castle-{_slug(castle.name)}",
         )

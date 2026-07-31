@@ -451,6 +451,11 @@ async def test_dashboard_app_shows_a_bounded_live_log_tail_for_a_castle():
     async with app.run_test() as pilot:
         await pilot.pause()
 
+        log_widget = app.query_one("#castle-parames-prod-42-issue-9-abc").query_one(
+            RichLog
+        )
+        assert log_widget.wrap is True
+
         lines = _castle_log_lines(app, "castle-parames-prod-42-issue-9-abc")
         assert lines == [
             "Run started 10:00",
