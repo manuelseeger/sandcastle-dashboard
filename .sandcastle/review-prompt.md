@@ -14,11 +14,11 @@ Review issue {{TASK_ID}}: {{ISSUE_TITLE}} on branch `{{BRANCH}}`.
 
 ## Diff
 
-!`git diff {{REVIEW_TARGET_BRANCH}}...{{BRANCH}}`
+!`git diff {{REVIEW_TARGET}}...{{BRANCH}}`
 
 ## Commits
 
-!`git log {{REVIEW_TARGET_BRANCH}}..{{BRANCH}}`
+!`git log {{REVIEW_TARGET}}..{{BRANCH}}`
 
 # REVIEW PROCESS
 

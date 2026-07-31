@@ -331,6 +331,20 @@ function ensureDependentBranch(issue: Issue, root: Root): string {
 // Issue implementation and review pipeline
 // ---------------------------------------------------------------------------
 
+// Materialize the host-resolved review target as a local sandbox ref. Isolated
+// sandboxes clone a bundle whose remote-tracking refs are not guaranteed to
+// retain their host names, so prompts must not depend on (for example) a
+// parent root branch being present by name.
+async function prepareReviewTarget(sandbox: sandcastle.Sandbox, target: string): Promise<string> {
+  const commit = git(["rev-parse", "--verify", `${target}^{commit}`]);
+  if (!/^[0-9a-f]{40}$/i.test(commit)) throw new Error(`invalid review target commit for ${target}`);
+
+  const ref = "refs/sandcastle/review-target";
+  const result = await sandbox.exec(`git update-ref ${ref} ${commit}`);
+  if (result.exitCode !== 0) throw new Error(`could not prepare review target: ${result.stderr.trim() || result.stdout.trim()}`);
+  return ref;
+}
+
 // Run the implementer and reviewer in one shared sandbox. Completion requires
 // both explicit promises, even when no commit or diff is produced: a retry may
 // already contain valid work, or the target branch may already satisfy an issue.
@@ -354,10 +368,11 @@ async function runIssue(issue: Issue, root: Root, baseBranch: string): Promise<{
         promptArgs: { TASK_ID: issue.id, ISSUE_TITLE: issue.title, ROOT_ID: root.id, ROOT_TITLE: root.title, ROOT_BRANCH: root.branch, BRANCH: branch },
       });
       if (implement.completionSignal !== COMPLETE) throw new Error("implementer did not complete");
+      const reviewTarget = await prepareReviewTarget(sandbox, target);
       const review = await sandbox.run({
         name: `reviewer-${issue.id}`, maxIterations: 100, agent: standardAgent,
         promptFile: "./.sandcastle/review-prompt.md", completionSignal: COMPLETE,
-        promptArgs: { TASK_ID: issue.id, ISSUE_TITLE: issue.title, BRANCH: branch, REVIEW_TARGET_BRANCH: target },
+        promptArgs: { TASK_ID: issue.id, ISSUE_TITLE: issue.title, BRANCH: branch, REVIEW_TARGET: reviewTarget },
       });
       if (review.completionSignal !== COMPLETE) throw new Error("reviewer did not complete");
       const status = await sandbox.exec("git status --porcelain");
