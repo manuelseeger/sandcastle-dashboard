@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from sandcastle_dashboard.branch_identity import (
+    BranchRunner,
+    attach_branches,
+    list_local_branches,
+    run_git_local_branches,
+)
 from sandcastle_dashboard.castle_correlation import correlate_castles
 from sandcastle_dashboard.discovery import (
     HostRunProcessGroup,
@@ -32,10 +38,12 @@ class LiveHostRunSnapshotProvider:
         proc_root: Path = Path("/proc"),
         git_runner: GitRunner = run_git_toplevel,
         sbx_runner: SbxRunner = run_sbx,
+        branch_runner: BranchRunner = run_git_local_branches,
     ) -> None:
         self._proc_root = proc_root
         self._git_runner = git_runner
         self._sbx_runner = sbx_runner
+        self._branch_runner = branch_runner
         self._tracker = HostRunTracker()
         self._resource_sampler = ResourceUsageSampler()
 
@@ -45,6 +53,13 @@ class LiveHostRunSnapshotProvider:
         host_runs = self._tracker.update(discovered)
         castle_discovery = discover_running_castles(self._sbx_runner)
         castles = correlate_castles(castle_discovery.castles, host_runs)
+        castles = attach_branches(
+            castles,
+            host_runs,
+            list_branches=lambda path: list_local_branches(
+                path, run=self._branch_runner
+            ),
+        )
         return Snapshot(
             host_runs=host_runs,
             castles=castles,

@@ -120,3 +120,27 @@ def test_correlate_castles_carries_uptime_and_session_count_through():
     assert castles[0].uptime_seconds == 120.0
     assert castles[0].session_count == 1
     assert castles[0].issue_number is None
+
+
+def test_correlate_castles_extracts_root_number_for_a_merger_castle():
+    host_run = HostRun(id="run-1", pid=42)
+    inspection = CastleInspection(
+        name="parames-prod-42-merge-7-a1b2c3", vm_state="running"
+    )
+
+    castles = correlate_castles([inspection], [host_run])
+
+    assert castles[0].scope == "merger"
+    assert castles[0].root_number == 7
+    assert castles[0].issue_number is None
+
+
+def test_correlate_castles_leaves_root_number_none_for_an_issue_castle():
+    host_run = HostRun(id="run-1", pid=42)
+    inspection = CastleInspection(
+        name="parames-prod-42-issue-9-a1b2c3", vm_state="running"
+    )
+
+    castles = correlate_castles([inspection], [host_run])
+
+    assert castles[0].root_number is None

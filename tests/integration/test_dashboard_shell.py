@@ -266,6 +266,7 @@ async def test_dashboard_app_shows_every_running_castle_for_the_selected_host_ru
             vm_state="running",
             uptime_seconds=125.0,
             session_count=1,
+            branch="sandcastle/issue-9",
         ),
         Castle(
             name="parames-prod-42-merge-3-def",
@@ -286,9 +287,16 @@ async def test_dashboard_app_shows_every_running_castle_for_the_selected_host_ru
         assert len(panes) == 2
         texts = _castle_pane_texts(app)
         assert any(
-            "issue" in text and "9" in text and "running" in text for text in texts
+            "issue" in text
+            and "9" in text
+            and "running" in text
+            and "sandcastle/issue-9" in text
+            for text in texts
         )
-        assert any("merger" in text and "stopped" in text for text in texts)
+        assert any(
+            "merger" in text and "stopped" in text and "Branch: unknown" in text
+            for text in texts
+        )
 
 
 async def test_dashboard_app_shows_running_castle_count_in_host_run_summary():

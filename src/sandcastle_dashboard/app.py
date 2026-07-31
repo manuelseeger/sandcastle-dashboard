@@ -55,12 +55,19 @@ def _format_scope(castle: Castle) -> str:
     return castle.scope
 
 
+def _format_branch(castle: Castle) -> str:
+    return (
+        f"Branch: {castle.branch}" if castle.branch is not None else "Branch: unknown"
+    )
+
+
 def _castle_pane_text(castle: Castle) -> str:
     sessions = "unknown" if castle.session_count is None else str(castle.session_count)
     return (
         f"{castle.name}\n"
         f"{_format_scope(castle)} • {castle.vm_state}\n"
-        f"{_format_uptime(castle.uptime_seconds)} • {sessions} session(s)"
+        f"{_format_uptime(castle.uptime_seconds)} • {sessions} session(s)\n"
+        f"{_format_branch(castle)}"
     )
 
 

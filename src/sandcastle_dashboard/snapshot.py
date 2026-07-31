@@ -53,6 +53,8 @@ class Castle:
     scope: str
     vm_state: str
     issue_number: int | None = None
+    root_number: int | None = None
+    branch: str | None = None
     uptime_seconds: float | None = None
     session_count: int | None = None
 

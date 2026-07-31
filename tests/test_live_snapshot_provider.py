@@ -227,6 +227,67 @@ def test_get_snapshot_correlates_a_running_castle_to_its_host_run(tmp_path):
     assert castle.issue_number == 9
 
 
+def _fake_branch_runner(branch_names: list[str]):
+    def runner(cwd: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="\n".join(branch_names) + "\n", stderr=""
+        )
+
+    return runner
+
+
+def test_get_snapshot_attaches_branch_when_it_exists_in_the_run_repository(tmp_path):
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    _write_uptime(proc_root)
+    _write_orchestrator(proc_root, pid=42, cwd=repo_dir)
+    listing = json.dumps([{"name": "parames-prod-42-issue-9-abc", "status": "running"}])
+    inspection = json.dumps(
+        {"state": "running", "uptime_seconds": 10.0, "active_sessions": 1}
+    )
+    provider = LiveHostRunSnapshotProvider(
+        proc_root=proc_root,
+        git_runner=_fake_git_runner(repo_dir),
+        sbx_runner=_fake_sbx_runner(
+            listing, {"parames-prod-42-issue-9-abc": inspection}
+        ),
+        branch_runner=_fake_branch_runner(["main", "sandcastle/issue-9"]),
+    )
+
+    snapshot = provider.get_snapshot()
+
+    assert snapshot.castles[0].branch == "sandcastle/issue-9"
+
+
+def test_get_snapshot_leaves_branch_unset_when_it_is_missing_from_the_run_repository(
+    tmp_path,
+):
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    _write_uptime(proc_root)
+    _write_orchestrator(proc_root, pid=42, cwd=repo_dir)
+    listing = json.dumps([{"name": "parames-prod-42-issue-9-abc", "status": "running"}])
+    inspection = json.dumps(
+        {"state": "running", "uptime_seconds": 10.0, "active_sessions": 1}
+    )
+    provider = LiveHostRunSnapshotProvider(
+        proc_root=proc_root,
+        git_runner=_fake_git_runner(repo_dir),
+        sbx_runner=_fake_sbx_runner(
+            listing, {"parames-prod-42-issue-9-abc": inspection}
+        ),
+        branch_runner=_fake_branch_runner(["main"]),
+    )
+
+    snapshot = provider.get_snapshot()
+
+    assert snapshot.castles[0].branch is None
+
+
 def test_get_snapshot_reports_readable_castle_discovery_error_without_discarding_host_runs(
     tmp_path,
 ):
