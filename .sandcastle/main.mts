@@ -20,9 +20,12 @@
 //   npm run sandcastle
 
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import * as sandcastle from "@ai-hero/sandcastle";
+import { worktreeForBranch } from "./branch-lifecycle.mts";
 import { withDockerSbxProvider, type DockerSbxOptions } from "./docker-sbx-provider.mts";
-import { mergedSources, prepareMergeSources } from "./merge-verification.mts";
+import { finalTree, mergedSources, prepareMergeSources } from "./merge-verification.mts";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
@@ -199,6 +202,16 @@ function isAncestor(ancestor: string, descendant: string): boolean {
   }
 }
 
+// An interrupted host-side patch replay must be resolved before this branch is
+// published again. Otherwise a later invocation could publish the patches that
+// applied before the failed `git am`, even though their merger result was lost.
+function hasIncompleteAm(branch: string): boolean {
+  const worktree = worktreeForBranch(git(["worktree", "list", "--porcelain"]), branch);
+  if (!worktree) return false;
+  const amPath = git(["-C", worktree, "rev-parse", "--git-path", "rebase-apply"]);
+  return existsSync(resolve(worktree, amPath));
+}
+
 // Publish only the named branch to the same remote branch and record that
 // same-named remote as its upstream. No force option is ever used: remote
 // rejection safely stops closure/finalization for that root.
@@ -263,6 +276,10 @@ function ensureRoot(rootId: string, rootTitle: string, baseBranch: string): Root
   const branch = branchFor(rootId);
   const remote = `refs/remotes/origin/${branch}`;
   git(["fetch", "origin", baseBranch, branch], true);
+  if (hasIncompleteAm(branch)) {
+    console.error(`  ✗ root #${rootId}: ${branch} has an interrupted git am session; resolve it before retrying`);
+    return undefined;
+  }
 
   const hasLocal = branchExists(`refs/heads/${branch}`);
   const hasRemote = branchExists(remote);
@@ -433,6 +450,18 @@ async function mergeRoot(root: Root, completed: Array<{ issue: Issue; branch: st
       const status = await sandbox.exec("git status --porcelain");
       if (result.completionSignal !== COMPLETE || status.exitCode !== 0 || status.stdout.trim()) {
         throw new Error("merger did not complete with a clean root worktree");
+      }
+      // Sandcastle replays commits onto the host, changing commit IDs. Compare
+      // trees while this sandbox still exists so a swallowed host `git am`
+      // failure cannot publish a partial root or close its dependents.
+      const sandboxTree = await finalTree(sandbox);
+      const hostTree = git(["rev-parse", "--verify", `${root.branch}^{tree}`]);
+      if (hostTree !== sandboxTree) {
+        throw new Error(
+          `host synchronization did not reproduce merger result for root #${root.id} `
+          + `(sandbox tree ${sandboxTree}, host tree ${hostTree}). Resolve the host `
+          + "git am session before retrying.",
+        );
       }
       // Await while the sandbox is still alive. Returning this promise directly
       // would enter finally and remove the microVM before git merge-base runs.

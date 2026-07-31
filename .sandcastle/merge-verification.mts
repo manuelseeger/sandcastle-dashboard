@@ -57,3 +57,13 @@ export async function mergedSources(sandbox: GitSandbox, sources: MergeSource[])
   }
   return merged;
 }
+
+/** Return the final sandbox tree so host sync can be checked without comparing commit IDs. */
+export async function finalTree(sandbox: GitSandbox): Promise<string> {
+  const result = await sandbox.exec("git rev-parse HEAD^{tree}");
+  const tree = result.stdout.trim();
+  if (result.exitCode !== 0 || !commitPattern.test(tree)) {
+    throw new Error(`could not determine sandbox final tree: ${result.stderr.trim() || tree}`);
+  }
+  return tree;
+}
