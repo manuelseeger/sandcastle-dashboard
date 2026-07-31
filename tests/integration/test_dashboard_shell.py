@@ -78,12 +78,14 @@ async def test_dashboard_app_with_empty_snapshot_shows_waiting_state_and_shortcu
         shortcuts = _footer_shortcuts(app)
         assert shortcuts.get("r") == "Refresh"
         assert shortcuts.get("q") == "Quit"
+        assert shortcuts.get("left_square_bracket") == "Prev Run"
+        assert shortcuts.get("right_square_bracket") == "Next Run"
 
 
 async def test_dashboard_app_applies_new_snapshots_automatically_without_blocking():
     provider = SwitchingSnapshotProvider(
         before=Snapshot(),
-        after=Snapshot(host_runs=(HostRun(id="host-run-1"),)),
+        after=Snapshot(host_runs=(HostRun(id="host-run-1", pid=123),)),
     )
     app = DashboardApp(snapshot_provider=provider, poll_interval=0.05)
 
@@ -94,7 +96,68 @@ async def test_dashboard_app_applies_new_snapshots_automatically_without_blockin
         provider.switch()
         await pilot.pause(0.4)
 
-        assert "1 Host Run" in app.query_one("#status", Static).content
+        assert "Host Run 1/1" in app.query_one("#status", Static).content
+
+
+async def test_dashboard_app_selects_the_newest_live_host_run_initially():
+    older = HostRun(id="run-older", pid=1, started_at=10.0)
+    newer = HostRun(id="run-newer", pid=2, started_at=20.0)
+    provider = StaticSnapshotProvider(Snapshot(host_runs=(older, newer)))
+    app = DashboardApp(snapshot_provider=provider, poll_interval=100)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert app.selected_host_run_id == "run-newer"
+        assert "pid 2" in app.query_one("#status", Static).content
+
+
+async def test_pressing_bracket_keys_switches_the_selected_host_run_immediately():
+    older = HostRun(id="run-older", pid=1, started_at=10.0)
+    newer = HostRun(id="run-newer", pid=2, started_at=20.0)
+    provider = StaticSnapshotProvider(Snapshot(host_runs=(older, newer)))
+    app = DashboardApp(snapshot_provider=provider, poll_interval=100)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.selected_host_run_id == "run-newer"
+
+        await pilot.press("]")
+        assert app.selected_host_run_id == "run-older"
+        assert "pid 1" in app.query_one("#status", Static).content
+
+        await pilot.press("[")
+        assert app.selected_host_run_id == "run-newer"
+        assert "pid 2" in app.query_one("#status", Static).content
+
+
+async def test_dashboard_app_preserves_selection_by_stable_identity_across_snapshots():
+    run = HostRun(id="run-1", pid=1, started_at=10.0)
+    provider = SwitchingSnapshotProvider(
+        before=Snapshot(host_runs=(run,)),
+        after=Snapshot(host_runs=(run, HostRun(id="run-2", pid=2, started_at=20.0))),
+    )
+    app = DashboardApp(snapshot_provider=provider, poll_interval=0.05)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.selected_host_run_id == "run-1"
+
+        provider.switch()
+        await pilot.pause(0.4)
+
+        assert app.selected_host_run_id == "run-1"
+
+
+async def test_dashboard_app_shows_a_disappeared_host_run_with_unknown_outcome():
+    run = HostRun(id="run-1", pid=1, started_at=10.0, ended=True)
+    provider = StaticSnapshotProvider(Snapshot(host_runs=(run,)))
+    app = DashboardApp(snapshot_provider=provider, poll_interval=100)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert "unknown" in app.query_one("#status", Static).content
 
 
 async def test_dashboard_app_never_overlaps_slow_automatic_refreshes():

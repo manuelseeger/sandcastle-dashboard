@@ -15,10 +15,29 @@ from typing import Protocol
 
 
 @dataclass(frozen=True, slots=True)
+class Repository:
+    """The Git repository associated with a Host Run's working directory."""
+
+    path: str
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
 class HostRun:
-    """One Sandcastle orchestration invocation discovered live."""
+    """One Sandcastle orchestration invocation discovered live.
+
+    Retained for the dashboard session after its process disappears, with
+    ``ended`` set to ``True`` to mark its outcome unknown: a separately
+    launched dashboard cannot reliably observe the orchestration exit code.
+    """
 
     id: str
+    pid: int
+    repository: Repository | None = None
+    started_at: float | None = None
+    process_state: str = "unknown"
+    ended: bool = False
+    process_group_pids: tuple[int, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)
