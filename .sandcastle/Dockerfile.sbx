@@ -1,0 +1,60 @@
+# Build and load once per host:
+# docker build -f .sandcastle/Dockerfile.sbx -t parames-sbx:dev .
+# docker image save parames-sbx:dev -o /tmp/parames-sbx-dev.tar
+# sbx template load /tmp/parames-sbx-dev.tar
+#
+# The Docker Engine supplied by this template runs inside an sbx microVM.
+# Never add credentials or project files to this image.
+FROM docker.io/docker/sandbox-templates:claude-code-docker
+
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  build-essential ca-certificates curl git gh jq \
+  && rm -rf /var/lib/apt/lists/*
+
+# The base sandbox template ships a self-updating Claude binary in
+# /home/agent/.local/bin. Install the current npm release and put its bin
+# directory first so the VM cannot keep invoking the base image's older copy.
+RUN npm install --global @anthropic-ai/claude-code@latest \
+ && /usr/local/share/npm-global/bin/claude --version
+
+# Install the browser runtime's OS libraries as root. The browser binary itself
+# is downloaded below as `agent`, so it is available from that user's cache.
+# playwright-cli opens the Chrome channel by default, so install it system-wide.
+RUN npm install --global @playwright/cli@latest \
+ && /usr/local/share/npm-global/lib/node_modules/@playwright/cli/node_modules/.bin/playwright install-deps chromium \
+ && /usr/local/share/npm-global/lib/node_modules/@playwright/cli/node_modules/.bin/playwright install chrome
+
+USER agent
+ENV PATH="/usr/local/share/npm-global/bin:/home/agent/.aspire/bin:/home/agent/.local/bin:${PATH}"
+
+# Download the Chromium driver into the runtime user's Playwright cache.
+RUN /usr/local/share/npm-global/lib/node_modules/@playwright/cli/node_modules/.bin/playwright install chromium
+
+# uv manages the exact Python runtime independently of the Ubuntu base image.
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+  && uv python install 3.13 --default
+
+# Keep the retained AppHost's supported Aspire release available in the VM.
+# The installer also installs the managed bundle required by TypeScript AppHosts.
+RUN curl -fsSL https://aspire.dev/install.sh | bash -s -- --version 13.4.6 --skip-path
+
+# Pre-populate the exact NuGet closure used by the TypeScript AppHost. Aspire's
+# managed host loads these .NET integrations at run time, even though apphost.mts
+# is TypeScript. This avoids an egress-dependent `aspire restore` in each VM;
+# project code and generated modules are deliberately not retained in the image.
+RUN mkdir -p /tmp/aspire-package-cache \
+ && printf '%s\n' \
+      '{"name":"aspire-package-cache","private":true,"type":"module"}' \
+      > /tmp/aspire-package-cache/package.json \
+ && printf '%s\n' \
+      '{"appHost":{"path":"apphost.mts","language":"typescript/nodejs"},"sdk":{"version":"13.4.6"},"channel":"stable","packages":{"Aspire.Hosting.MongoDB":"13.4.6"}}' \
+      > /tmp/aspire-package-cache/aspire.config.json \
+ && printf '%s\n' \
+      "import { createBuilder } from './.aspire/modules/aspire.mjs';" \
+      'const builder = await createBuilder();' \
+      'await builder.build();' \
+      > /tmp/aspire-package-cache/apphost.mts \
+ && cd /tmp/aspire-package-cache \
+ && aspire restore --non-interactive \
+ && rm -rf /tmp/aspire-package-cache

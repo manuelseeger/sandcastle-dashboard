@@ -221,3 +221,5 @@ __marimo__/
 .pi/
 .claude/
 docs/agents/
+
+node_modules/
