@@ -3,10 +3,13 @@
 from click.testing import CliRunner
 
 from sandcastle_dashboard import cli
+from sandcastle_dashboard.live_snapshot_provider import LiveHostRunSnapshotProvider
 from sandcastle_dashboard.snapshot import Snapshot
 
 
-def test_main_runs_the_dashboard_app_with_a_null_snapshot_provider(monkeypatch):
+def test_main_runs_the_dashboard_app_with_a_live_host_run_snapshot_provider(
+    monkeypatch,
+):
     captured = {}
 
     class FakeDashboardApp:
@@ -22,4 +25,6 @@ def test_main_runs_the_dashboard_app_with_a_null_snapshot_provider(monkeypatch):
 
     assert result.exit_code == 0
     assert captured["ran"] is True
-    assert captured["snapshot_provider"].get_snapshot() == Snapshot()
+    provider = captured["snapshot_provider"]
+    assert isinstance(provider, LiveHostRunSnapshotProvider)
+    assert isinstance(provider.get_snapshot(), Snapshot)

@@ -5,24 +5,17 @@ from __future__ import annotations
 import click
 
 from sandcastle_dashboard.app import DashboardApp
-from sandcastle_dashboard.snapshot import Snapshot, SnapshotProvider
-
-
-class NullSnapshotProvider(SnapshotProvider):
-    """Reports that no Host Run exists.
-
-    A placeholder used until host discovery adapters (a later issue) supply a
-    real ``SnapshotProvider``.
-    """
-
-    def get_snapshot(self) -> Snapshot:
-        return Snapshot()
+from sandcastle_dashboard.live_snapshot_provider import LiveHostRunSnapshotProvider
 
 
 @click.command()
 def main() -> None:
     """Launch the Sandcastle dashboard."""
-    DashboardApp(snapshot_provider=NullSnapshotProvider()).run()
+    provider = LiveHostRunSnapshotProvider()
+    try:
+        DashboardApp(snapshot_provider=provider).run()
+    finally:
+        provider.close()
 
 
 if __name__ == "__main__":
