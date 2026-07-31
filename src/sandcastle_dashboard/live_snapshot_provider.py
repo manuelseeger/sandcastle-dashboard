@@ -17,6 +17,7 @@ from sandcastle_dashboard.discovery import (
     HostRunProcessGroup,
     discover_host_run_processes,
 )
+from sandcastle_dashboard.github import GitHubIssueEnricher
 from sandcastle_dashboard.host_run_tracker import HostRunTracker
 from sandcastle_dashboard.logs import resolve_castle_log
 from sandcastle_dashboard.repository import (
@@ -44,6 +45,7 @@ class LiveHostRunSnapshotProvider:
         git_runner: GitRunner = run_git_toplevel,
         sbx_runner: SbxRunner = run_sbx,
         branch_runner: BranchRunner = run_git_local_branches,
+        github_enricher: GitHubIssueEnricher | None = None,
     ) -> None:
         self._proc_root = proc_root
         self._git_runner = git_runner
@@ -51,6 +53,9 @@ class LiveHostRunSnapshotProvider:
         self._branch_runner = branch_runner
         self._tracker = HostRunTracker()
         self._resource_sampler = ResourceUsageSampler()
+        self._github_enricher = (
+            github_enricher if github_enricher is not None else GitHubIssueEnricher()
+        )
 
     def get_snapshot(self) -> Snapshot:
         groups = discover_host_run_processes(self._proc_root)
@@ -70,12 +75,17 @@ class LiveHostRunSnapshotProvider:
             self._resolve_log(castle, host_runs_by_id.get(castle.host_run_id))
             for castle in castles
         )
+        castles = self._github_enricher.enrich(castles, host_runs)
         host_runs = tuple(self._attach_last_activity(run, castles) for run in host_runs)
         return Snapshot(
             host_runs=host_runs,
             castles=castles,
             castle_discovery_error=castle_discovery.error,
         )
+
+    def close(self) -> None:
+        """Release background GitHub lookup workers owned by the provider."""
+        self._github_enricher.close()
 
     def _resolve_log(self, castle: Castle, host_run: HostRun | None) -> Castle:
         if host_run is None or host_run.repository is None:

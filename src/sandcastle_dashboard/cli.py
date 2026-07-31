@@ -11,7 +11,11 @@ from sandcastle_dashboard.live_snapshot_provider import LiveHostRunSnapshotProvi
 @click.command()
 def main() -> None:
     """Launch the Sandcastle dashboard."""
-    DashboardApp(snapshot_provider=LiveHostRunSnapshotProvider()).run()
+    provider = LiveHostRunSnapshotProvider()
+    try:
+        DashboardApp(snapshot_provider=provider).run()
+    finally:
+        provider.close()
 
 
 if __name__ == "__main__":

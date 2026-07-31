@@ -6,6 +6,7 @@ import asyncio
 import math
 import re
 import time
+import webbrowser
 from collections.abc import Callable, Sequence
 from typing import ClassVar
 
@@ -51,7 +52,8 @@ def _format_uptime(uptime_seconds: float | None) -> str:
 
 def _format_scope(castle: Castle) -> str:
     if castle.scope == "issue" and castle.issue_number is not None:
-        return f"issue #{castle.issue_number}"
+        label = f"issue #{castle.issue_number}"
+        return f"{label} {castle.issue_title}" if castle.issue_title else label
     return castle.scope
 
 
@@ -161,6 +163,8 @@ class DashboardApp(App[None]):
         Binding("down", "focus_castle_down", "Down"),
         Binding("left", "focus_castle_left", "Left"),
         Binding("right", "focus_castle_right", "Right"),
+        Binding("enter", "open_issue", "Open Issue"),
+        Binding("o", "open_issue_alternate", "Open Issue"),
     ]
 
     snapshot: reactive[Snapshot] = reactive(Snapshot(), always_update=True)
@@ -173,6 +177,7 @@ class DashboardApp(App[None]):
         clock: Callable[[], float] = time.time,
         cpu_count: int | None = None,
         total_memory_bytes: int | None = None,
+        url_opener: Callable[[str], bool] = webbrowser.open,
     ) -> None:
         super().__init__()
         self._snapshot_provider = snapshot_provider
@@ -188,6 +193,7 @@ class DashboardApp(App[None]):
             else system_resources.total_memory_bytes()
         )
         self._grid_host_run_id: str | None = None
+        self._url_opener = url_opener
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -235,6 +241,45 @@ class DashboardApp(App[None]):
 
     def action_focus_castle_right(self) -> None:
         self._move_castle_focus("right")
+
+    def action_open_issue_alternate(self) -> None:
+        self.action_open_issue()
+
+    def action_open_issue(self) -> None:
+        focused_name = getattr(self.screen.focused, "castle_name", None)
+        castle = next(
+            (
+                castle
+                for castle in self.snapshot.castles
+                if castle.host_run_id == self.selected_host_run_id
+                and castle.name == focused_name
+            ),
+            None,
+        )
+        if castle is None or castle.issue_number is None:
+            self.notify(
+                "The focused Castle has no GitHub issue.",
+                severity="warning",
+                markup=False,
+            )
+            return
+        if castle.issue_url is None:
+            self.notify(
+                f"GitHub issue #{castle.issue_number} URL is unavailable.",
+                severity="warning",
+                markup=False,
+            )
+            return
+        try:
+            opened = self._url_opener(castle.issue_url)
+        except OSError, webbrowser.Error:
+            opened = False
+        if not opened:
+            self.notify(
+                f"Could not open GitHub issue #{castle.issue_number}.",
+                severity="error",
+                markup=False,
+            )
 
     def _move_castle_focus(self, direction: str) -> None:
         panes = list(self.query("#castle-grid CastlePane"))

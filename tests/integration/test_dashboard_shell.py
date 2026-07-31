@@ -87,6 +87,8 @@ async def test_dashboard_app_with_empty_snapshot_shows_waiting_state_and_shortcu
         assert shortcuts.get("down") == "Down"
         assert shortcuts.get("left") == "Left"
         assert shortcuts.get("right") == "Right"
+        assert shortcuts.get("enter") == "Open Issue"
+        assert shortcuts.get("o") == "Open Issue"
 
 
 async def test_dashboard_app_applies_new_snapshots_automatically_without_blocking():
@@ -268,6 +270,10 @@ def _castle_log_lines(app: DashboardApp, pane_id: str) -> list[str]:
     return [strip.text for strip in log_widget.lines]
 
 
+def _toast_text(app: DashboardApp) -> str:
+    return "\n".join(str(toast.render()) for toast in app.query("Toast"))
+
+
 async def test_dashboard_app_shows_every_running_castle_for_the_selected_host_run():
     run = HostRun(id="run-1", pid=42, started_at=10.0)
     castles = (
@@ -310,6 +316,26 @@ async def test_dashboard_app_shows_every_running_castle_for_the_selected_host_ru
             "merger" in text and "stopped" in text and "Branch: unknown" in text
             for text in texts
         )
+
+
+async def test_dashboard_app_shows_an_enriched_github_issue_title():
+    run = HostRun(id="run-1", pid=42, started_at=10.0)
+    castle = Castle(
+        name="parames-prod-42-issue-9-abc",
+        host_run_id="run-1",
+        scope="issue",
+        issue_number=9,
+        issue_title="Enrich and open focused GitHub issues",
+        vm_state="running",
+    )
+    provider = StaticSnapshotProvider(Snapshot(host_runs=(run,), castles=(castle,)))
+    app = DashboardApp(snapshot_provider=provider, poll_interval=100)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        text = _castle_pane_texts(app)[0]
+        assert "#9 Enrich and open focused GitHub issues" in text
 
 
 async def test_dashboard_app_shows_an_issue_castles_inferred_phase():
@@ -677,3 +703,115 @@ async def test_castle_grid_refresh_preserves_identity_then_falls_back_and_resets
         await pilot.press("]")
         assert app.selected_host_run_id == "run-2"
         assert _focused_castle_name(app) == "run-2-castle"
+
+
+async def test_pressing_enter_and_o_open_the_focused_castles_github_issue_url():
+    run = HostRun(id="run-1", pid=42, started_at=10.0)
+    castle = Castle(
+        name="issue-castle",
+        host_run_id="run-1",
+        scope="issue",
+        issue_number=9,
+        issue_url="https://github.com/example/project/issues/9",
+        vm_state="running",
+    )
+    opened_urls: list[str] = []
+    app = DashboardApp(
+        snapshot_provider=StaticSnapshotProvider(
+            Snapshot(host_runs=(run,), castles=(castle,))
+        ),
+        poll_interval=100,
+        url_opener=lambda url: opened_urls.append(url) or True,
+    )
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        await pilot.press("enter")
+        await pilot.press("o")
+
+        assert opened_urls == [
+            "https://github.com/example/project/issues/9",
+            "https://github.com/example/project/issues/9",
+        ]
+
+
+async def test_open_issue_when_url_opener_fails_shows_readable_notification():
+    run = HostRun(id="run-1", pid=42, started_at=10.0)
+    castle = Castle(
+        name="issue-castle",
+        host_run_id="run-1",
+        scope="issue",
+        issue_number=9,
+        issue_url="https://github.com/example/project/issues/9",
+        vm_state="running",
+    )
+
+    def broken_opener(_url):
+        raise OSError("browser unavailable")
+
+    app = DashboardApp(
+        snapshot_provider=StaticSnapshotProvider(
+            Snapshot(host_runs=(run,), castles=(castle,))
+        ),
+        poll_interval=100,
+        url_opener=broken_opener,
+    )
+
+    async with app.run_test(notifications=True) as pilot:
+        await pilot.pause()
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert "Could not open" in _toast_text(app)
+        assert app.is_running
+
+
+async def test_open_issue_for_a_castle_without_an_issue_shows_readable_notification():
+    run = HostRun(id="run-1", pid=42, started_at=10.0)
+    castle = Castle(
+        name="planner-castle",
+        host_run_id="run-1",
+        scope="planner",
+        vm_state="running",
+    )
+    app = DashboardApp(
+        snapshot_provider=StaticSnapshotProvider(
+            Snapshot(host_runs=(run,), castles=(castle,))
+        ),
+        poll_interval=100,
+    )
+
+    async with app.run_test(notifications=True) as pilot:
+        await pilot.pause()
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert "no GitHub issue" in _toast_text(app)
+
+
+async def test_open_issue_without_an_enriched_url_shows_readable_notification():
+    run = HostRun(id="run-1", pid=42, started_at=10.0)
+    castle = Castle(
+        name="issue-castle",
+        host_run_id="run-1",
+        scope="issue",
+        issue_number=9,
+        vm_state="running",
+    )
+    app = DashboardApp(
+        snapshot_provider=StaticSnapshotProvider(
+            Snapshot(host_runs=(run,), castles=(castle,))
+        ),
+        poll_interval=100,
+    )
+
+    async with app.run_test(notifications=True) as pilot:
+        await pilot.pause()
+
+        await pilot.press("o")
+        await pilot.pause()
+
+        assert "URL is unavailable" in _toast_text(app)

@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from concurrent.futures import Future
 from pathlib import Path
 
+from sandcastle_dashboard.github import GitHubIssue, GitHubIssueEnricher
 from sandcastle_dashboard.live_snapshot_provider import LiveHostRunSnapshotProvider
 from sandcastle_dashboard.snapshot import Repository
 
@@ -350,6 +352,54 @@ def test_get_snapshot_reports_provisioning_before_a_role_log_exists(tmp_path):
     assert castle.log_tail == ()
     assert castle.last_activity_at is None
     assert snapshot.host_runs[0].last_activity_at is None
+
+
+def test_get_snapshot_applies_completed_github_enrichment_on_a_later_poll(tmp_path):
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    _write_uptime(proc_root)
+    _write_orchestrator(proc_root, pid=42, cwd=repo_dir)
+    listing = json.dumps([{"name": "parames-prod-42-issue-9-abc", "status": "running"}])
+    inspection = json.dumps(
+        {"state": "running", "uptime_seconds": 10.0, "active_sessions": 1}
+    )
+    future: Future[GitHubIssue | None] = Future()
+
+    class ControlledExecutor:
+        def submit(self, _function, *_args):
+            return future
+
+    enricher = GitHubIssueEnricher(
+        lookup=lambda _repository, _issue_number: None,
+        executor=ControlledExecutor(),
+    )
+    provider = LiveHostRunSnapshotProvider(
+        proc_root=proc_root,
+        git_runner=_fake_git_runner(repo_dir),
+        sbx_runner=_fake_sbx_runner(
+            listing, {"parames-prod-42-issue-9-abc": inspection}
+        ),
+        branch_runner=_fake_branch_runner(["main", "sandcastle/issue-9"]),
+        github_enricher=enricher,
+    )
+
+    initial = provider.get_snapshot()
+    assert initial.castles[0].issue_title is None
+
+    future.set_result(
+        GitHubIssue(
+            title="Enrich and open focused GitHub issues",
+            url="https://github.com/example/project/issues/9",
+        )
+    )
+    enriched = provider.get_snapshot()
+
+    assert enriched.castles[0].issue_title == "Enrich and open focused GitHub issues"
+    assert (
+        enriched.castles[0].issue_url == "https://github.com/example/project/issues/9"
+    )
 
 
 def test_get_snapshot_reports_readable_castle_discovery_error_without_discarding_host_runs(

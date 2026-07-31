@@ -54,6 +54,8 @@ class Castle:
     scope: str
     vm_state: str
     issue_number: int | None = None
+    issue_title: str | None = None
+    issue_url: str | None = None
     root_number: int | None = None
     scope_id: str | None = None
     branch: str | None = None
