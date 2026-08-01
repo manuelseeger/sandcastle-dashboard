@@ -128,4 +128,5 @@ class LiveHostRunSnapshotProvider:
             memory_bytes=group.memory_bytes,
             invocation_id=group.invocation_id,
             deployment_id=group.deployment_id,
+            castle_names=tuple(sorted(group.castle_names)),
         )

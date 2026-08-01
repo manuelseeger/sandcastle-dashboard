@@ -43,6 +43,7 @@ class HostRun:
     invocation_id: str | None = None
     deployment_id: str | None = None
     last_activity_at: float | None = None
+    castle_names: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)

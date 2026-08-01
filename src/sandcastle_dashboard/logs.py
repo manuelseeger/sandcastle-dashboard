@@ -101,7 +101,15 @@ def select_role_log(logs_dir: Path, castle: Castle) -> tuple[Path | None, str]:
         return None, "provisioning" if castle.scope == "issue" else castle.scope
 
     if castle.scope == "planner":
-        return _newest(logs_dir.glob("*-planner.log")), "planner"
+        return (
+            _newest(
+                [
+                    *logs_dir.glob("*-planner.log"),
+                    *logs_dir.glob("*-picker-*.log"),
+                ]
+            ),
+            "planner",
+        )
 
     if castle.scope == "merger":
         path = None
@@ -117,11 +125,7 @@ def select_role_log(logs_dir: Path, castle: Castle) -> tuple[Path | None, str]:
         candidates = [
             (
                 role,
-                _newest(
-                    logs_dir.glob(
-                        f"sandcastle-issue-{castle.issue_number}-{role}-*.log"
-                    )
-                ),
+                _newest(logs_dir.glob(f"*-issue-{castle.issue_number}-{role}-*.log")),
             )
             for role in ("implementer", "reviewer")
         ]
