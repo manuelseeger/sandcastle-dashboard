@@ -28,6 +28,14 @@ def test_parse_castle_name_extracts_planner_scope():
     assert parsed.scope_id == "1"
 
 
+def test_parse_castle_name_extracts_current_implementer_scope_and_issue_number():
+    parsed = parse_castle_name("mes-bio-implement-39-unique")
+
+    assert parsed.scope == "issue"
+    assert parsed.scope_id == "39"
+    assert parsed.invocation_or_pid is None
+
+
 def test_parse_castle_name_extracts_merger_scope_from_merge_keyword():
     parsed = parse_castle_name("parames-prod-4821-merge-7-a1b2c3")
 
@@ -40,6 +48,22 @@ def test_parse_castle_name_returns_no_scope_for_an_unrecognized_name():
 
     assert parsed.scope is None
     assert parsed.invocation_or_pid is None
+
+
+def test_correlate_castles_matches_current_name_via_owning_sbx_process():
+    inspection = CastleInspection(
+        name="mes-bio-implement-39-unique", vm_state="running"
+    )
+    host_run = HostRun(
+        id="run-1", pid=4821, castle_names=("mes-bio-implement-39-unique",)
+    )
+
+    castles = correlate_castles([inspection], [host_run])
+
+    assert len(castles) == 1
+    assert castles[0].host_run_id == "run-1"
+    assert castles[0].scope == "issue"
+    assert castles[0].issue_number == 39
 
 
 def test_correlate_castles_matches_by_pid_when_no_explicit_invocation_id():
@@ -55,6 +79,7 @@ def test_correlate_castles_matches_by_pid_when_no_explicit_invocation_id():
     assert castle.host_run_id == "run-1"
     assert castle.scope == "issue"
     assert castle.issue_number == 9
+    assert castle.agent_model == "claude-sonnet-5"
     assert castle.vm_state == "running"
 
 
@@ -104,6 +129,27 @@ def test_correlate_castles_rejects_an_invocation_match_from_the_wrong_deployment
     castles = correlate_castles([inspection], [wrong_deployment_run])
 
     assert castles == ()
+
+
+def test_correlate_castles_assigns_high_capacity_model_to_planner_and_merger_castles():
+    host_run = HostRun(id="run-1", pid=42)
+    inspections = (
+        CastleInspection(
+            name="parames-local-42-planner-1-abc",
+            vm_state="running",
+        ),
+        CastleInspection(
+            name="parames-local-42-merge-9-abc",
+            vm_state="running",
+        ),
+    )
+
+    castles = correlate_castles(inspections, (host_run,))
+
+    assert [castle.agent_model for castle in castles] == [
+        "claude-opus-5",
+        "claude-opus-5",
+    ]
 
 
 def test_correlate_castles_carries_uptime_and_session_count_through():

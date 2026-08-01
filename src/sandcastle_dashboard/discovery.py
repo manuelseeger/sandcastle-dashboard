@@ -19,7 +19,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-ORCHESTRATOR_SCRIPT_SUFFIXES = (".sandcastle/main.mts",)
+ORCHESTRATOR_SCRIPT_SUFFIXES = (".sandcastle/main.mts", ".sandcastle/main.ts")
 WRAPPER_EXECUTABLE_NAMES = frozenset({"npm", "tsx"})
 
 # The only environment keys discovery ever reads, and only for the
@@ -57,6 +57,7 @@ class ProcessRecord:
     memory_bytes: int
     invocation_id: str | None = None
     deployment_id: str | None = None
+    castle_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +75,7 @@ class HostRunProcessGroup:
     sampled_at: float
     invocation_id: str | None = None
     deployment_id: str | None = None
+    castle_names: frozenset[str] = frozenset()
 
 
 def discover_host_run_processes(
@@ -107,6 +109,11 @@ def discover_host_run_processes(
         )
         cpu_ticks_total = sum(processes[pid].cpu_ticks for pid in members)
         memory_bytes_total = sum(processes[pid].memory_bytes for pid in members)
+        castle_names = frozenset(
+            processes[pid].castle_name
+            for pid in members
+            if processes[pid].castle_name is not None
+        )
         groups.append(
             HostRunProcessGroup(
                 pid=record.pid,
@@ -120,6 +127,7 @@ def discover_host_run_processes(
                 sampled_at=sampled_at,
                 invocation_id=record.invocation_id,
                 deployment_id=record.deployment_id,
+                castle_names=castle_names,
             )
         )
     return groups
@@ -182,6 +190,7 @@ def _read_process(pid_dir: Path) -> ProcessRecord | None:
     ppid, state_code, starttime_ticks, utime_ticks, stime_ticks, rss_pages = parsed
     argv = _read_cmdline(pid_dir)
     role = _classify(argv)
+    castle_name = _sbx_exec_sandbox_name(argv)
     cwd = _read_cwd(pid_dir)
     invocation_id = None
     deployment_id = None
@@ -200,6 +209,7 @@ def _read_process(pid_dir: Path) -> ProcessRecord | None:
         memory_bytes=rss_pages * _page_size(),
         invocation_id=invocation_id,
         deployment_id=deployment_id,
+        castle_name=castle_name,
     )
 
 
@@ -284,6 +294,47 @@ def _classify(argv: list[str]) -> str:
         if any(token.endswith(suffix) for suffix in ORCHESTRATOR_SCRIPT_SUFFIXES):
             return "orchestrator"
     return "other"
+
+
+def _sbx_exec_sandbox_name(argv: list[str]) -> str | None:
+    """Return the sandbox name from an ``sbx exec`` command, if present.
+
+    The command line is examined only long enough to skip its known options
+    and retain the sandbox name, which is also returned by ``sbx ls --json``.
+    In particular, ``-e`` values are never retained.
+    """
+    if len(argv) < 3 or Path(argv[0]).name != "sbx" or argv[1] != "exec":
+        return None
+    options_with_values = {
+        "-e",
+        "--env",
+        "--env-file",
+        "-u",
+        "--user",
+        "-w",
+        "--workdir",
+        "--detach-keys",
+    }
+    index = 2
+    while index < len(argv):
+        token = argv[index]
+        if token == "--":
+            index += 1
+            break
+        if token in options_with_values:
+            index += 2
+            continue
+        if token.startswith(("--env=", "--env-file=")):
+            index += 1
+            continue
+        if token.startswith(("--user=", "--workdir=")):
+            index += 1
+            continue
+        if token.startswith(("--detach-keys=", "-")):
+            index += 1
+            continue
+        return token
+    return argv[index] if index < len(argv) else None
 
 
 def _boot_epoch(proc_root: Path) -> float | None:

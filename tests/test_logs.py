@@ -132,6 +132,16 @@ def test_select_role_log_for_issue_scope_identifies_the_implementer_log(tmp_path
     assert phase == "implementer"
 
 
+def test_select_role_log_for_issue_scope_matches_current_work_branch_filename(tmp_path):
+    implementer = tmp_path / "sandcastle-work-issue-39-implementer-39.log"
+    implementer.write_text("implementer output")
+
+    path, phase = select_role_log(tmp_path, _castle("issue", issue_number=39))
+
+    assert path == implementer
+    assert phase == "implementer"
+
+
 def test_select_role_log_for_issue_scope_prefers_the_most_recently_active_role(
     tmp_path,
 ):

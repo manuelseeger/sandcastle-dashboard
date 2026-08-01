@@ -94,7 +94,11 @@ def test_discover_host_run_processes_groups_npm_tsx_wrappers_under_orchestrator_
     repo_dir = tmp_path.parent / "repo"
     repo_dir.mkdir()
     _write_process(
-        tmp_path, pid=10, ppid=1, argv=["npm", "run", "sandcastle"], comm="npm"
+        tmp_path,
+        pid=10,
+        ppid=1,
+        argv=["npm", "--prefix", ".sandcastle", "run", "sandcastle"],
+        comm="npm",
     )
     _write_process(
         tmp_path, pid=11, ppid=10, argv=["tsx", ".sandcastle/main.mts"], comm="node"
@@ -122,13 +126,21 @@ def test_discover_host_run_processes_groups_node_launched_tsx_under_child_orches
 ):
     _write_uptime(tmp_path)
     _write_process(
-        tmp_path, pid=10, ppid=1, argv=["npm", "run", "sandcastle"], comm="npm"
+        tmp_path,
+        pid=10,
+        ppid=1,
+        argv=["npm", "--prefix", ".sandcastle", "run", "sandcastle"],
+        comm="npm",
     )
     _write_process(
         tmp_path,
         pid=11,
         ppid=10,
-        argv=["node", "/project/node_modules/.bin/tsx", ".sandcastle/main.mts"],
+        argv=[
+            "node",
+            "/project/.sandcastle/node_modules/.bin/tsx",
+            ".sandcastle/main.mts",
+        ],
     )
     _write_process(
         tmp_path,
@@ -142,6 +154,55 @@ def test_discover_host_run_processes_groups_node_launched_tsx_under_child_orches
     assert len(groups) == 1
     assert groups[0].pid == 12
     assert groups[0].member_pids == frozenset({10, 11, 12})
+
+
+def test_discover_host_run_processes_with_typescript_entrypoint_finds_group(tmp_path):
+    _write_uptime(tmp_path)
+    _write_process(
+        tmp_path,
+        pid=15,
+        ppid=1,
+        argv=[
+            "node",
+            "--require",
+            "/home/user/.npm/_npx/example/node_modules/tsx/dist/preflight.cjs",
+            "--import",
+            "file:///home/user/.npm/_npx/example/node_modules/tsx/dist/loader.mjs",
+            "--env-file=.sandcastle/.env",
+            ".sandcastle/main.ts",
+        ],
+    )
+
+    groups = discover_host_run_processes(tmp_path)
+
+    assert len(groups) == 1
+    assert groups[0].pid == 15
+
+
+def test_discover_host_run_processes_with_sbx_exec_tracks_castle_name(tmp_path):
+    _write_uptime(tmp_path)
+    _write_process(tmp_path, pid=20, ppid=1, argv=["node", ".sandcastle/main.ts"])
+    _write_process(
+        tmp_path,
+        pid=21,
+        ppid=20,
+        argv=[
+            "sbx",
+            "exec",
+            "-e",
+            "TOKEN=not-retained",
+            "mes-bio-implement-39-unique",
+            "sh",
+            "-lc",
+            "claude",
+        ],
+        comm="sbx",
+    )
+
+    groups = discover_host_run_processes(tmp_path)
+
+    assert groups[0].castle_names == frozenset({"mes-bio-implement-39-unique"})
+    assert "TOKEN=not-retained" not in repr(groups[0])
 
 
 def test_discover_host_run_processes_groups_descendant_processes_under_orchestrator_pid(

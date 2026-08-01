@@ -1,14 +1,17 @@
 """Parses Castle names and correlates running Castles with Host Runs.
 
-Castle names follow the documented convention::
+Castle names use either the legacy convention::
 
     parames-<deployment>-<invocation-or-pid>-<scope>-<unique suffix>
 
-The ``<invocation-or-pid>`` segment holds an explicit
-``SANDCASTLE_INVOCATION_ID`` when the Host Run set one, or the
-orchestrator's PID otherwise. Correlation matches an explicit Host Run
-invocation identifier first, then falls back to comparing the segment
-against a Host Run's PID.
+or the current provider convention::
+
+    <project>-<picker|implement|review>-<issue-id>-<unique suffix>
+
+Legacy names correlate via their invocation identifier or PID. Current names
+are correlated through the owning Host Run's descendant ``sbx exec`` process,
+which supplies the sandbox name without depending on a project-specific name
+prefix.
 """
 
 from __future__ import annotations
@@ -19,6 +22,15 @@ from sandcastle_dashboard.sbx import CastleInspection
 from sandcastle_dashboard.snapshot import Castle, HostRun
 
 _SCOPE_LABELS = {"planner": "planner", "issue": "issue", "merge": "merger"}
+_CURRENT_SCOPE_LABELS = {"picker": "planner", "implement": "issue", "review": "issue"}
+
+# Keep this in sync with the agents configured in .sandcastle/main.mts. Issue
+# Castles run the implementer and reviewer sequentially on the same Sonnet model.
+_MODEL_BY_SCOPE = {
+    "planner": "claude-opus-5",
+    "issue": "claude-sonnet-5",
+    "merger": "claude-opus-5",
+}
 
 
 class ParsedCastleName:
@@ -57,6 +69,15 @@ def parse_castle_name(name: str) -> ParsedCastleName:
             scope=scope,
             scope_id=tokens[index + 1],
         )
+    for index, token in enumerate(tokens):
+        scope = _CURRENT_SCOPE_LABELS.get(token)
+        if scope is not None and index + 1 < len(tokens):
+            return ParsedCastleName(
+                deployment=None,
+                invocation_or_pid=None,
+                scope=scope,
+                scope_id=tokens[index + 1],
+            )
     return ParsedCastleName(None, None, None, None)
 
 
@@ -71,7 +92,7 @@ def correlate_castles(
     castles = []
     for inspection in inspections:
         parsed = parse_castle_name(inspection.name)
-        host_run_id = _match_host_run(parsed, host_runs)
+        host_run_id = _match_host_run(inspection.name, parsed, host_runs)
         if host_run_id is None or parsed.scope is None:
             continue
         castles.append(
@@ -79,6 +100,7 @@ def correlate_castles(
                 name=inspection.name,
                 host_run_id=host_run_id,
                 scope=parsed.scope,
+                agent_model=_MODEL_BY_SCOPE[parsed.scope],
                 issue_number=_as_int(parsed.scope_id)
                 if parsed.scope == "issue"
                 else None,
@@ -95,8 +117,11 @@ def correlate_castles(
 
 
 def _match_host_run(
-    parsed: ParsedCastleName, host_runs: Sequence[HostRun]
+    castle_name: str, parsed: ParsedCastleName, host_runs: Sequence[HostRun]
 ) -> str | None:
+    for run in host_runs:
+        if castle_name in run.castle_names:
+            return run.id
     if parsed.invocation_or_pid is None:
         return None
     for run in host_runs:

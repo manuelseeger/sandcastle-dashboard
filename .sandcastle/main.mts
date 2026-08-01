@@ -17,7 +17,7 @@
 // branch naming, publication, PR state, and issue closure remain deterministic.
 //
 // Usage:
-//   npm run sandcastle
+//   npm --prefix .sandcastle run sandcastle
 
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
